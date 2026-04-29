@@ -26,6 +26,7 @@ AIGC 生成解释和行动计划
 - 商品推荐：不接淘宝、京东、拼多多，默认使用 AIGC 生成商品需求清单，不声称实时 SKU、库存或购买链接。
 - 严格真实数据模式：`STRICT_REAL_DATA=true` 时不使用本地 JSON 补餐厅、景点或商品结果。
 - 反馈闭环：SQLite 保存用户对推荐结果的真实反馈，并影响后续排序。
+- Provider 缓存：高德地点、天气和路线响应写入 SQLite 缓存，缓存 key 不包含 API Key。
 
 ## 已实现 API
 
@@ -52,6 +53,7 @@ LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-v4-flash
 PRODUCT_PROVIDER=aigc
 STRICT_REAL_DATA=true
+PROVIDER_CACHE_TTL_SECONDS=300
 ```
 
 ## 数据真实性规则
@@ -66,6 +68,5 @@ STRICT_REAL_DATA=true
 
 1. 增加“换一个”接口：基于当前 request_id 排除已有推荐并重新生成。
 2. 增加 PostgreSQL 适配：替换 SQLite，支持多人部署。
-3. 增加缓存层：缓存高德 POI、天气和路线，降低第三方 API 调用频率。
-4. 增加更多路线 Provider：驾车、公交、骑行。
-5. 增加推荐评估脚本：检查预算、距离、健康约束和数据来源。
+3. 增加更多路线 Provider：驾车、公交、骑行。
+4. 增加推荐评估脚本：检查预算、距离、健康约束和数据来源。

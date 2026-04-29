@@ -157,6 +157,7 @@ function renderProviderCapabilities(data) {
     ["AIGC", data.aigc?.active, data.aigc?.source],
     ["商品", data.shopping?.active, data.shopping?.source],
     ["严格真实数据", data.strict_real_data?.active, data.strict_real_data?.fallback],
+    ["Provider 缓存", data.provider_cache?.active, data.provider_cache?.source],
   ];
   providerSummary.innerHTML = items
     .map(([label, active, source]) => `

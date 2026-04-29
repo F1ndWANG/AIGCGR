@@ -37,8 +37,8 @@ Recommendation Response
 |---|---|---|
 | 地点 | 高德地图 Web 服务 API | 无结果则返回空 |
 | 逆地理编码 | 高德逆地理编码 API | 无结果则标记 unavailable |
-| 天气 | 高德天气 API | 无结果则不生成天气建议 |
-| 路线 | 高德步行路径规划 API | 无结果则不生成路线字段 |
+| 天气 | 高德天气 API + SQLite 缓存 | 无结果则不生成天气建议 |
+| 路线 | 高德步行路径规划 API + SQLite 缓存 | 无结果则不生成路线字段 |
 | AIGC | DeepSeek/OpenAI-compatible API | 失败时说明失败 |
 | 商品 | AIGC 商品需求生成器 | 无结果则返回空 |
 
@@ -68,6 +68,7 @@ Recommendation Response
 - AIGC 策略摘要和商品需求生成。
 - `STRICT_REAL_DATA` 严格真实数据模式。
 - SQLite 运行时推荐历史和用户反馈。
+- SQLite Provider 响应缓存，降低外部 API 重复调用。
 - 用户反馈会影响后续推荐排序。
 
 ### 前端
@@ -104,6 +105,7 @@ Recommendation Response
 | `backend/app/aigc.py` | DeepSeek/OpenAI-compatible 调用 |
 | `backend/app/config.py` | `.env` 配置读取 |
 | `backend/app/storage.py` | SQLite 推荐历史和反馈存储 |
+| `backend/app/cache.py` | Provider 响应缓存 |
 | `frontend/app.js` | 前端交互逻辑 |
 
 ## 7. 运行方式
@@ -139,6 +141,5 @@ http://127.0.0.1:5173
 
 1. 增加“换一个”接口：基于当前 request_id 排除已有推荐并重新生成。
 2. 增加 PostgreSQL 适配：替换 SQLite，支持多人部署。
-3. 增加缓存层：缓存高德 POI、天气和路线。
-4. 增加推荐评估脚本：检查预算、距离、健康和数据来源。
-5. 扩展路线能力：驾车、公交、骑行。
+3. 增加推荐评估脚本：检查预算、距离、健康和数据来源。
+4. 扩展路线能力：驾车、公交、骑行。

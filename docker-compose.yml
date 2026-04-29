@@ -1,0 +1,9 @@
+services:
+  liferec-api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./runtime:/app/runtime

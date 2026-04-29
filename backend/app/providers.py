@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-import httpx
-
+from .cache import cached_get_json
 from .config import settings
 from .data_loader import load_dataset
 from .geo import haversine_km
@@ -114,10 +113,7 @@ class AmapPlaceProvider:
             params["types"] = poi_type
         else:
             params["keywords"] = keyword
-        with httpx.Client(timeout=8) as client:
-            response = client.get("https://restapi.amap.com/v3/place/around", params=params)
-            response.raise_for_status()
-            payload = response.json()
+        payload = cached_get_json("amap", "https://restapi.amap.com/v3/place/around", params)
         self._ensure_success(payload)
 
         pois = payload.get("pois", [])
@@ -140,10 +136,7 @@ class AmapPlaceProvider:
             params["keywords"] = keyword
         if city:
             params["city"] = city
-        with httpx.Client(timeout=8) as client:
-            response = client.get("https://restapi.amap.com/v3/place/text", params=params)
-            response.raise_for_status()
-            payload = response.json()
+        payload = cached_get_json("amap", "https://restapi.amap.com/v3/place/text", params)
         self._ensure_success(payload)
         return [self._to_place(poi, None, None) for poi in payload.get("pois", [])]
 
@@ -156,10 +149,7 @@ class AmapPlaceProvider:
             "location": f"{longitude},{latitude}",
             "extensions": "base",
         }
-        with httpx.Client(timeout=8) as client:
-            response = client.get("https://restapi.amap.com/v3/geocode/regeo", params=params)
-            response.raise_for_status()
-            payload = response.json()
+        payload = cached_get_json("amap", "https://restapi.amap.com/v3/geocode/regeo", params)
         self._ensure_success(payload)
         regeocode = payload.get("regeocode", {})
         component = regeocode.get("addressComponent", {})
@@ -187,10 +177,7 @@ class AmapPlaceProvider:
             "city": city_code,
             "extensions": "base",
         }
-        with httpx.Client(timeout=8) as client:
-            response = client.get("https://restapi.amap.com/v3/weather/weatherInfo", params=params)
-            response.raise_for_status()
-            payload = response.json()
+        payload = cached_get_json("amap", "https://restapi.amap.com/v3/weather/weatherInfo", params)
         self._ensure_success(payload)
         lives = payload.get("lives", [])
         if not lives:
@@ -218,10 +205,7 @@ class AmapPlaceProvider:
             "origin": f"{origin_longitude},{origin_latitude}",
             "destination": f"{destination_longitude},{destination_latitude}",
         }
-        with httpx.Client(timeout=8) as client:
-            response = client.get("https://restapi.amap.com/v3/direction/walking", params=params)
-            response.raise_for_status()
-            payload = response.json()
+        payload = cached_get_json("amap", "https://restapi.amap.com/v3/direction/walking", params)
         self._ensure_success(payload)
         paths = payload.get("route", {}).get("paths", [])
         if not paths:
@@ -329,5 +313,11 @@ def provider_capabilities() -> dict[str, dict[str, bool | str]]:
             "source": "configuration",
             "fallback": "disabled" if settings.strict_real_data else "enabled-for-dev",
             "env": "STRICT_REAL_DATA",
+        },
+        "provider_cache": {
+            "active": settings.provider_cache_ttl_seconds > 0,
+            "source": "sqlite",
+            "fallback": "disabled" if settings.provider_cache_ttl_seconds <= 0 else "ttl",
+            "env": "PROVIDER_CACHE_TTL_SECONDS",
         },
     }

@@ -106,6 +106,7 @@ PRODUCT_PROVIDER=aigc
 
 ```text
 STRICT_REAL_DATA=true
+PROVIDER_CACHE_TTL_SECONDS=300
 ```
 
 开启后：
@@ -136,6 +137,7 @@ STRICT_REAL_DATA=true
 - `source=aigc`：LLM 生成建议，不是外部实时事实。
 - `source=sample-data`：本地开发样例，不应作为生产真实数据。
 - 高德 POI 不提供完整菜单，因此菜品建议是健康选择原则，不代表餐厅真实菜单。
+- Provider 缓存不保存 API Key；缓存内容只用于减少重复请求。
 
 ## 9. 参考文档
 

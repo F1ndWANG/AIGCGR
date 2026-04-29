@@ -29,4 +29,4 @@
 
 ## 运行时数据
 
-`runtime/liferec.sqlite3` 保存推荐历史和用户反馈。该数据来自用户真实操作，不属于静态样例数据，默认不提交到 Git。
+`runtime/liferec.sqlite3` 保存推荐历史、用户反馈和 Provider 响应缓存。该数据来自用户真实操作或真实 API 响应，不属于静态样例数据，默认不提交到 Git。

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,17 @@ def init_storage() -> None:
                 reason TEXT,
                 tags_json TEXT NOT NULL,
                 source TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_cache (
+                cache_key TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
             """
@@ -144,6 +155,66 @@ def feedback_summary(user_id: str, limit: int = 200) -> dict[str, Any]:
             }
         )
     return profile
+
+
+def get_cache(cache_key: str) -> dict[str, Any] | None:
+    init_storage()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT payload_json, expires_at
+            FROM api_cache
+            WHERE cache_key = ?
+            """,
+            (cache_key,),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        expires_at = datetime.fromisoformat(row["expires_at"])
+    except ValueError:
+        return None
+    if expires_at <= datetime.now(timezone.utc):
+        return None
+    try:
+        payload = json.loads(row["payload_json"])
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def set_cache(cache_key: str, provider: str, payload: dict[str, Any], ttl_seconds: int) -> None:
+    init_storage()
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO api_cache
+            (cache_key, provider, payload_json, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                cache_key,
+                provider,
+                json.dumps(payload, ensure_ascii=False),
+                expires_at.isoformat(),
+                _now(),
+            ),
+        )
+
+
+def storage_status() -> dict[str, Any]:
+    init_storage()
+    with _connect() as conn:
+        recommendation_count = conn.execute("SELECT COUNT(*) FROM recommendation_events").fetchone()[0]
+        feedback_count = conn.execute("SELECT COUNT(*) FROM feedback_events").fetchone()[0]
+        cache_count = conn.execute("SELECT COUNT(*) FROM api_cache").fetchone()[0]
+    return {
+        "database": str(DB_PATH),
+        "recommendation_events": recommendation_count,
+        "feedback_events": feedback_count,
+        "cache_entries": cache_count,
+    }
 
 
 def _connect() -> sqlite3.Connection:

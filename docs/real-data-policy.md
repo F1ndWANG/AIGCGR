@@ -24,6 +24,7 @@ LifeRec 的目标是优先使用真实动态数据，不把本地示例数据伪
 - 如果某个 Provider 没有真实数据，响应中必须保留 `source`，说明是 `unavailable`、`aigc` 或 `sample-data`。
 - 本地 JSON 只用于开发 fallback、测试和演示；`STRICT_REAL_DATA=true` 时不用于补推荐结果。
 - 用户反馈只影响候选排序，不生成虚假地点、天气、路线或商品。
+- Provider 缓存只缓存真实 API 响应，缓存 key 不包含 API Key。
 
 ## 3. 当前真实 API
 

@@ -21,6 +21,7 @@ LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-v4-flash
 PRODUCT_PROVIDER=aigc
 STRICT_REAL_DATA=true
+PROVIDER_CACHE_TTL_SECONDS=300
 ```
 
 `STRICT_REAL_DATA=true` 表示不使用本地餐厅、景点、商品样例补结果。适合你当前“所有数据都是真实的，不是静态的”的要求。
@@ -174,6 +175,8 @@ runtime/liferec.sqlite3
 ```
 
 该目录已被 `.gitignore` 忽略。反馈数据用于后续推荐重排，不会上传到第三方 Provider。
+
+Provider 响应缓存也保存在同一个 SQLite 文件中。缓存 key 会剔除 API Key，只按请求 Provider、URL 和非密钥参数生成。
 
 ## 7. 安全注意事项
 

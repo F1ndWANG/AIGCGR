@@ -28,6 +28,7 @@ class Settings:
     llm_model: str = os.getenv("LLM_MODEL", "deepseek-v4-flash")
     product_provider: str = os.getenv("PRODUCT_PROVIDER", "aigc")
     strict_real_data: bool = os.getenv("STRICT_REAL_DATA", "false").lower() in {"1", "true", "yes", "on"}
+    provider_cache_ttl_seconds: int = int(os.getenv("PROVIDER_CACHE_TTL_SECONDS", "300"))
 
 
 settings = Settings()

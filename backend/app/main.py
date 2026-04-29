@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -24,20 +26,21 @@ from .models import (
 from .product_providers import get_product_provider, product_provider_status
 from .providers import get_place_provider, provider_capabilities
 from .recommender import recommend
-from .storage import feedback_summary, init_storage, save_feedback_event
+from .storage import feedback_summary, init_storage, save_feedback_event, storage_status
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_storage()
+    yield
 
 
 app = FastAPI(
     title="LifeRec API",
     description="AIGC 与生成式推荐结合的 AI 生活推荐系统后端。",
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_storage()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,8 +51,12 @@ app.add_middleware(
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "version": app.version,
+        "storage": storage_status(),
+    }
 
 
 @app.get("/api/dataset/summary")

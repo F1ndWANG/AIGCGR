@@ -1,0 +1,46 @@
+[
+  {
+    "id": "r001",
+    "name": "青禾轻食",
+    "location": "南京江宁大学城",
+    "latitude": 31.9386,
+    "longitude": 118.9052,
+    "distance_km": 0.8,
+    "avg_price": 39,
+    "tags": ["轻食", "低油", "高蛋白", "蔬菜"],
+    "dish_ids": ["d001", "d002"]
+  },
+  {
+    "id": "r002",
+    "name": "南粥北面",
+    "location": "南京江宁文鼎广场",
+    "latitude": 31.9348,
+    "longitude": 118.9001,
+    "distance_km": 1.2,
+    "avg_price": 28,
+    "tags": ["清淡", "汤粥", "少盐", "易消化"],
+    "dish_ids": ["d003", "d004", "d005"]
+  },
+  {
+    "id": "r003",
+    "name": "鱼时光健康小馆",
+    "location": "南京江宁龙眠大道",
+    "latitude": 31.9304,
+    "longitude": 118.9129,
+    "distance_km": 1.9,
+    "avg_price": 46,
+    "tags": ["鱼肉", "低油", "清淡", "高蛋白"],
+    "dish_ids": ["d006", "d004"]
+  },
+  {
+    "id": "r004",
+    "name": "川味快餐",
+    "location": "南京江宁商业街",
+    "latitude": 31.9412,
+    "longitude": 118.8972,
+    "distance_km": 0.6,
+    "avg_price": 32,
+    "tags": ["重辣", "重油", "快餐"],
+    "dish_ids": ["d007"]
+  }
+]

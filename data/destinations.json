@@ -1,0 +1,46 @@
+[
+  {
+    "id": "t001",
+    "city": "扬州",
+    "latitude": 32.3932,
+    "longitude": 119.4129,
+    "distance_km": 105,
+    "duration": "2天",
+    "budget": 850,
+    "tags": ["轻松", "美食", "短途", "园林", "城市漫步"],
+    "highlights": ["瘦西湖", "个园", "东关街", "淮扬菜"]
+  },
+  {
+    "id": "t002",
+    "city": "苏州",
+    "latitude": 31.2989,
+    "longitude": 120.5853,
+    "distance_km": 215,
+    "duration": "2天",
+    "budget": 980,
+    "tags": ["园林", "美食", "城市漫步", "文化"],
+    "highlights": ["拙政园", "平江路", "苏州博物馆", "观前街"]
+  },
+  {
+    "id": "t003",
+    "city": "杭州",
+    "latitude": 30.2741,
+    "longitude": 120.1551,
+    "distance_km": 280,
+    "duration": "2-3天",
+    "budget": 1200,
+    "tags": ["自然风景", "城市漫步", "咖啡", "轻松"],
+    "highlights": ["西湖", "灵隐寺", "河坊街", "龙井村"]
+  },
+  {
+    "id": "t004",
+    "city": "黄山",
+    "latitude": 29.7147,
+    "longitude": 118.3376,
+    "distance_km": 360,
+    "duration": "3天",
+    "budget": 1500,
+    "tags": ["自然风景", "徒步", "强度较高"],
+    "highlights": ["黄山风景区", "宏村", "屯溪老街"]
+  }
+]

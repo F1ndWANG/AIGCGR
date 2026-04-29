@@ -1,0 +1,2 @@
+"""LifeRec backend package."""
+

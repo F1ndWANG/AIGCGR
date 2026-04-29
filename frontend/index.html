@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LifeRec AI 生活推荐系统</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">LR</span>
+        <div>
+          <strong>LifeRec</strong>
+          <small>AIGC Life Recommendation</small>
+        </div>
+      </div>
+
+      <nav class="scenario-list" aria-label="推荐场景">
+        <button class="scenario is-active" data-scenario="auto">自动识别</button>
+        <button class="scenario" data-scenario="restaurant">饮食餐厅</button>
+        <button class="scenario" data-scenario="shopping">生活购物</button>
+        <button class="scenario" data-scenario="travel">旅行规划</button>
+      </nav>
+
+      <section class="profile-panel">
+        <p class="eyebrow">Runtime Context</p>
+        <h2>位置、近期饮食和偏好由本次请求输入决定</h2>
+        <div class="profile-tags">
+          <span>高德真实 POI</span>
+          <span>AIGC 商品需求</span>
+          <span>反馈学习</span>
+          <span>用户授权定位</span>
+        </div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Generative Life Recommender</p>
+          <h1>把“我该怎么安排生活”变成可执行推荐</h1>
+        </div>
+        <a class="doc-link" href="../docs/architecture.md">架构文档</a>
+      </header>
+
+      <section class="composer" aria-label="推荐输入">
+        <textarea id="messageInput" rows="4">我今天不想吃饭，最近吃得有点油腻，学校附近有什么健康一点的？</textarea>
+        <div class="location-bar">
+          <button id="locateBtn" class="secondary-action">使用当前位置</button>
+          <label>
+            推荐半径
+            <input id="radiusInput" type="number" min="1" max="50" step="1" value="3">
+            km
+          </label>
+          <span id="locationStatus">未启用动态位置；餐厅/景点真实推荐需要当前位置或城市信息。</span>
+        </div>
+        <div class="context-grid" aria-label="用户实时状态">
+          <label>
+            近期饮食标签
+            <input id="recentMealTagsInput" type="text" placeholder="例如：高油, 蔬菜少">
+          </label>
+          <label>
+            口味偏好
+            <input id="tasteInput" type="text" placeholder="例如：清淡, 少辣">
+          </label>
+          <label>
+            忌口 / 过敏
+            <input id="avoidInput" type="text" placeholder="例如：花生, 辣">
+          </label>
+          <label>
+            旅行偏好
+            <input id="travelStyleInput" type="text" placeholder="例如：轻松, 自然, 博物馆">
+          </label>
+        </div>
+        <div class="composer-actions">
+          <div class="quick-prompts">
+            <button data-prompt="我想开始健康饮食，帮我推荐一份购物清单。">健康购物清单</button>
+            <button data-prompt="我周末从南京出发玩两天，预算 1000，不想太累。">周末旅行</button>
+            <button data-prompt="晚上想吃清淡一点，预算 40 元以内，最好离学校近。">清淡晚餐</button>
+          </div>
+          <button id="submitBtn" class="primary-action">生成推荐</button>
+        </div>
+      </section>
+
+      <section id="statusPanel" class="status-panel">
+        <div>
+          <span class="status-dot"></span>
+          <strong>等待输入</strong>
+        </div>
+        <p>启动后端后点击生成推荐，系统会返回场景识别、推荐结果和行动计划。</p>
+      </section>
+
+      <section class="provider-panel" aria-label="Provider 状态">
+        <p class="eyebrow">Live Providers</p>
+        <div id="providerSummary" class="provider-grid">
+          <span>正在读取 Provider 状态...</span>
+        </div>
+      </section>
+
+      <section class="result-grid">
+        <div class="insight-column">
+          <article class="panel">
+            <p class="eyebrow">Intent</p>
+            <h2 id="intentSummary">尚未生成</h2>
+          </article>
+          <article class="panel">
+            <p class="eyebrow">Health Context</p>
+            <p id="healthSummary">系统会根据近期饮食记录给出健康约束。</p>
+          </article>
+          <article class="panel">
+            <p class="eyebrow">AIGC Strategy</p>
+            <p id="aigcSummary">AIGC 模块会生成推荐策略摘要。</p>
+          </article>
+          <article class="panel">
+            <p class="eyebrow">Plan</p>
+            <ol id="planList" class="plan-list"></ol>
+          </article>
+        </div>
+
+        <div class="recommendation-column">
+          <div class="section-heading">
+            <p class="eyebrow">Recommendations</p>
+            <h2>推荐结果</h2>
+          </div>
+          <div id="recommendationList" class="cards empty-state">
+            <p>推荐卡片会显示匹配分、理由、建议菜品或行程亮点。</p>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

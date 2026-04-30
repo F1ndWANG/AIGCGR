@@ -79,7 +79,7 @@ def _call_openai_compatible_llm(message: str, scenario: str, health_tags: list[s
             )
             response.raise_for_status()
             data = response.json()
-            content = data["choices"][0]["message"]["content"].strip()
+            content = _message_text(data["choices"][0]["message"]).strip()
             return content or _fallback_brief(message, scenario, health_tags)
     except Exception as exc:
         if settings.strict_real_data:
@@ -149,7 +149,7 @@ def _call_product_idea_llm(keyword: str, scenario: str, budget: float | None, ta
                 json=payload,
             )
             response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
+            content = _message_text(response.json()["choices"][0]["message"])
             return _parse_product_json(content)
     except Exception:
         return []
@@ -160,13 +160,59 @@ def _parse_product_json(content: str) -> list[dict[str, object]]:
     match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if match:
         text = match.group(1).strip()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+    data = _loads_json_array(text)
+    if data is None:
+        data = _loads_embedded_product_array(text)
+    if data is None:
+        data = _loads_embedded_product_objects(text)
+    if data is None:
         return []
     if not isinstance(data, list):
         return []
     return [item for item in data if isinstance(item, dict)]
+
+
+def _message_text(message: dict[str, object]) -> str:
+    content = message.get("content")
+    if isinstance(content, str) and content.strip():
+        return content
+    reasoning_content = message.get("reasoning_content")
+    if isinstance(reasoning_content, str):
+        return reasoning_content
+    return ""
+
+
+def _loads_json_array(text: str) -> object | None:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, list) else None
+
+
+def _loads_embedded_product_array(text: str) -> object | None:
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\[", text):
+        try:
+            data, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list) and any(isinstance(item, dict) for item in data):
+            return data
+    return None
+
+
+def _loads_embedded_product_objects(text: str) -> object | None:
+    decoder = json.JSONDecoder()
+    items: list[dict[str, object]] = []
+    for match in re.finditer(r"\{", text):
+        try:
+            data, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and "name" in data:
+            items.append(data)
+    return items or None
 
 
 def _fallback_product_ideas(keyword: str, scenario: str, budget: float | None, tags: list[str], limit: int) -> list[dict[str, object]]:

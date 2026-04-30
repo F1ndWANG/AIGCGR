@@ -29,9 +29,10 @@ const aigcSummary = document.querySelector("#aigcSummary");
 const planList = document.querySelector("#planList");
 const recommendationList = document.querySelector("#recommendationList");
 const providerSummary = document.querySelector("#providerSummary");
+const memorySummary = document.querySelector("#memorySummary");
 
 loadProviderCapabilities();
-loadMealHistory();
+loadUserContext();
 
 scenarioButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -201,6 +202,7 @@ async function saveMealLog() {
     recentMealTagsInput.value = data.recent_meal_tags.join(", ");
     mealNameInput.value = "";
     mealTagsInput.value = "";
+    await loadUserContext();
     setStatus("饮食记录已保存，下一次推荐会参考真实饮食历史。", "ready");
   } catch (error) {
     setStatus("饮食记录保存失败，请确认后端已启动。", "error");
@@ -223,6 +225,41 @@ async function loadMealHistory() {
   } catch (error) {
     console.debug("Meal history unavailable", error);
   }
+}
+
+async function loadUserContext() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/user/context?user_id=u001&limit=20`);
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+    const data = await response.json();
+    renderUserContext(data);
+    if (data.recent_meal_tags?.length) {
+      recentMealTagsInput.value = data.recent_meal_tags.join(", ");
+    }
+  } catch (error) {
+    memorySummary.innerHTML = "<span>用户上下文暂不可用</span>";
+    console.debug("User context unavailable", error);
+    await loadMealHistory();
+  }
+}
+
+function renderUserContext(data) {
+  const positiveEvents = data.feedback?.events?.filter((event) => ["like", "save", "plan"].includes(event.action)).length || 0;
+  const negativeEvents = data.feedback?.events?.filter((event) => ["dislike", "skip"].includes(event.action)).length || 0;
+  const tags = data.recent_meal_tags?.length
+    ? data.recent_meal_tags.slice(0, 6).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")
+    : "<span>暂无饮食标签</span>";
+
+  memorySummary.innerHTML = `
+    <div class="memory-stats">
+      <strong>${data.meals?.length || 0}</strong><small>饮食记录</small>
+      <strong>${positiveEvents}</strong><small>正反馈</small>
+      <strong>${negativeEvents}</strong><small>负反馈</small>
+    </div>
+    <div class="profile-tags">${tags}</div>
+  `;
 }
 
 function renderResult(data) {
@@ -351,6 +388,7 @@ async function sendFeedback(item, action, button) {
       throw new Error(`API returned ${response.status}`);
     }
     button.textContent = "已记录";
+    await loadUserContext();
     setStatus("反馈已保存，下一次推荐会参考你的偏好。", "ready");
   } catch (error) {
     button.disabled = false;

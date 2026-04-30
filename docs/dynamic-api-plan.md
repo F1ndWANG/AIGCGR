@@ -47,6 +47,7 @@ AIGC 生成解释和行动计划
 | `GET /api/providers/capabilities` | 配置状态 | 查看真实 Provider 是否启用 |
 | `POST /api/feedback` | SQLite 运行时数据 | 保存用户反馈 |
 | `GET /api/feedback/summary` | SQLite 运行时数据 | 查看反馈画像 |
+| `GET /api/user/context` | SQLite 运行时数据 | 聚合饮食、反馈和上下文来源 |
 | `POST /api/user/meals` | SQLite 运行时数据 | 保存真实饮食记录 |
 | `GET /api/user/meals` | SQLite 运行时数据 | 查看近期饮食标签 |
 

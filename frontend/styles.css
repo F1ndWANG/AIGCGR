@@ -136,6 +136,47 @@ button {
   background: rgba(255, 255, 255, 0.55);
 }
 
+.memory-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-summary > span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.memory-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.memory-stats strong,
+.memory-stats small {
+  display: block;
+  text-align: center;
+}
+
+.memory-stats strong {
+  padding: 8px 6px 2px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: #fff;
+  font-size: 20px;
+}
+
+.memory-stats small {
+  padding: 0 6px 8px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .workspace {
   padding: 34px;
 }

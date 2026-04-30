@@ -68,6 +68,14 @@ GET /api/feedback/summary?user_id=u001
 }
 ```
 
+### `GET /api/user/context`
+
+聚合用户上下文。前端和后续 Agent 可以用它一次性读取饮食记录、近期饮食标签、反馈画像、存储状态和上下文来源。
+
+```text
+GET /api/user/context?user_id=u001&limit=20
+```
+
 ## 3. 如何影响推荐
 
 推荐接口会读取该用户的历史反馈：

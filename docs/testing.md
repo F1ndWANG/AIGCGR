@@ -44,6 +44,7 @@ python scripts\evaluate_recommendations.py --request request.json --response res
 - 推荐结果不能重复。
 - “换一批”排除列表中的 item 不能再次出现。
 - 推荐请求未传近期饮食标签时，应能读取运行时饮食记录。
+- 用户上下文接口应聚合饮食记录、反馈画像和存储状态。
 - 候选距离不能超过请求半径。
 - 候选价格不应明显超过预算。
 - 严格真实数据模式下不能返回 `sample-data`。

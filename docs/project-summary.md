@@ -59,6 +59,7 @@ Recommendation Response
 - `POST /api/aigc/brief`
 - `POST /api/feedback`
 - `GET /api/feedback/summary`
+- `GET /api/user/context`
 - `POST /api/user/meals`
 - `GET /api/user/meals`
 
@@ -87,6 +88,7 @@ Recommendation Response
 - 浏览器当前位置按钮。
 - 本次请求的饮食、口味、忌口和旅行偏好输入。
 - 快速记录一餐，并回填近期饮食标签。
+- 用户记忆摘要：饮食记录、正反馈、负反馈和近期标签。
 - Provider 能力状态展示。
 - 推荐卡片、健康上下文、AIGC 摘要和行动计划展示。
 

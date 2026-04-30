@@ -227,6 +227,15 @@ class MealHistoryResponse(BaseModel):
     meals: list[MealEvent]
 
 
+class UserContextResponse(BaseModel):
+    user_id: str
+    recent_meal_tags: list[str]
+    meals: list[MealEvent]
+    feedback: FeedbackSummaryResponse
+    storage: dict[str, str | int]
+    context_sources: dict[str, str]
+
+
 class RefreshRecommendationRequest(BaseModel):
     request_id: str
     user_id: str = "u001"

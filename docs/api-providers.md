@@ -27,6 +27,7 @@ uvicorn app.main:app --reload --port 8000
 | `POST /api/aigc/brief` | LLM | 生成推荐策略摘要 |
 | `POST /api/feedback` | SQLite 运行时数据 | 保存用户反馈 |
 | `GET /api/feedback/summary` | SQLite 运行时数据 | 查看反馈画像 |
+| `GET /api/user/context` | SQLite 运行时数据 | 聚合用户上下文 |
 | `POST /api/user/meals` | SQLite 运行时数据 | 保存真实饮食记录 |
 | `GET /api/user/meals` | SQLite 运行时数据 | 查看近期饮食标签 |
 
@@ -154,6 +155,14 @@ POST /api/user/meals
 ```http
 GET /api/user/meals?user_id=u001&limit=20
 ```
+
+聚合用户上下文：
+
+```http
+GET /api/user/context?user_id=u001&limit=20
+```
+
+该接口会返回近期饮食标签、饮食记录、反馈画像、存储状态和上下文来源，方便前端或后续 Agent 一次性读取用户运行时状态。
 
 该 API 不依赖第三方平台，也不会把本地样例饮食伪装成真实用户记录。
 

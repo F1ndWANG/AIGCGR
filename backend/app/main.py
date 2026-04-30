@@ -25,6 +25,7 @@ from .models import (
     ReverseGeocodeResponse,
     RouteRequest,
     RouteResponse,
+    UserContextResponse,
     WeatherResponse,
 )
 from .product_providers import get_product_provider, product_provider_status
@@ -217,6 +218,27 @@ def get_meal_logs(user_id: str = "u001", limit: int = 20) -> MealHistoryResponse
         user_id=user_id,
         recent_meal_tags=recent_meal_tags(user_id=user_id, limit=safe_limit),
         meals=meal_history(user_id=user_id, limit=safe_limit),
+    )
+
+
+@app.get("/api/user/context", response_model=UserContextResponse)
+def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextResponse:
+    safe_limit = max(1, min(limit, 100))
+    feedback = FeedbackSummaryResponse(**feedback_summary(user_id=user_id))
+    meals = meal_history(user_id=user_id, limit=safe_limit)
+    tags = recent_meal_tags(user_id=user_id, limit=safe_limit)
+    return UserContextResponse(
+        user_id=user_id,
+        recent_meal_tags=tags,
+        meals=meals,
+        feedback=feedback,
+        storage=storage_status(),
+        context_sources={
+            "meals": "runtime.sqlite.meal_events",
+            "feedback": "runtime.sqlite.feedback_events",
+            "recommendations": "runtime.sqlite.recommendation_events",
+            "provider_cache": "runtime.sqlite.api_cache",
+        },
     )
 
 

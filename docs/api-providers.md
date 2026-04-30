@@ -17,6 +17,7 @@ uvicorn app.main:app --reload --port 8000
 | `GET /api/dataset/summary` | 本地文件统计 | 查看开发样例数据规模 |
 | `GET /api/providers/capabilities` | 配置状态 | 查看高德、LLM、严格真实数据模式 |
 | `POST /api/recommend` | 高德 + LLM + 用户输入 | 统一生活推荐入口 |
+| `POST /api/recommend/refresh` | 历史推荐 + 高德/LLM | 排除上一批结果并重新生成 |
 | `POST /api/context/nearby` | 高德周边搜索 | 查询附近餐厅、景点、服务 |
 | `POST /api/context/places/search` | 高德关键词搜索 | 按城市/关键词查询地点 |
 | `GET /api/context/geocode/reverse` | 高德逆地理编码 | 经纬度转地址和 adcode |
@@ -26,6 +27,8 @@ uvicorn app.main:app --reload --port 8000
 | `POST /api/aigc/brief` | LLM | 生成推荐策略摘要 |
 | `POST /api/feedback` | SQLite 运行时数据 | 保存用户反馈 |
 | `GET /api/feedback/summary` | SQLite 运行时数据 | 查看反馈画像 |
+| `POST /api/user/meals` | SQLite 运行时数据 | 保存真实饮食记录 |
+| `GET /api/user/meals` | SQLite 运行时数据 | 查看近期饮食标签 |
 
 ## 2. 高德开放平台 API
 
@@ -131,15 +134,39 @@ PROVIDER_CACHE_TTL_SECONDS=300
 - `plan`：加入计划。
 - `skip`：跳过。
 
-## 8. 数据来源边界
+## 8. 饮食记录 API
+
+饮食记录来自用户主动输入，默认写入 `runtime/liferec.sqlite3`。推荐接口会在未传入 `recent_meal_tags` 时读取该用户最近的饮食标签，用于识别高油、高盐、蔬菜少、蛋白不足等生活状态。
+
+```http
+POST /api/user/meals
+```
+
+```json
+{
+  "user_id": "u001",
+  "meal_name": "炸鸡和奶茶",
+  "tags": ["高油", "高糖", "蔬菜少"],
+  "note": "晚餐"
+}
+```
+
+```http
+GET /api/user/meals?user_id=u001&limit=20
+```
+
+该 API 不依赖第三方平台，也不会把本地样例饮食伪装成真实用户记录。
+
+## 9. 数据来源边界
 
 - `source=amap`：真实高德数据。
 - `source=aigc`：LLM 生成建议，不是外部实时事实。
 - `source=sample-data`：本地开发样例，不应作为生产真实数据。
 - 高德 POI 不提供完整菜单，因此菜品建议是健康选择原则，不代表餐厅真实菜单。
 - Provider 缓存不保存 API Key；缓存内容只用于减少重复请求。
+- 运行时饮食记录来自用户输入，只作为健康约束和排序信号。
 
-## 9. 参考文档
+## 10. 参考文档
 
 - 高德 Web 服务 API：https://lbs.amap.com/api/webservice/summary
 - 高德地点搜索：https://lbs.amap.com/api/webservice/guide/api/search

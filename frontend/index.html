@@ -77,6 +77,15 @@
             <input id="travelStyleInput" type="text" placeholder="例如：轻松, 自然, 博物馆">
           </label>
         </div>
+        <div class="meal-log-panel" aria-label="记录真实饮食">
+          <div>
+            <p class="eyebrow">Meal Memory</p>
+            <strong>记录一餐，后续推荐自动参考</strong>
+          </div>
+          <input id="mealNameInput" type="text" placeholder="例如：炸鸡、奶茶、麻辣烫">
+          <input id="mealTagsInput" type="text" placeholder="标签：高油 高盐 蔬菜少">
+          <button id="saveMealBtn" class="secondary-action">保存饮食</button>
+        </div>
         <div class="composer-actions">
           <div class="quick-prompts">
             <button data-prompt="我想开始健康饮食，帮我推荐一份购物清单。">健康购物清单</button>
@@ -124,8 +133,11 @@
 
         <div class="recommendation-column">
           <div class="section-heading">
-            <p class="eyebrow">Recommendations</p>
-            <h2>推荐结果</h2>
+            <div>
+              <p class="eyebrow">Recommendations</p>
+              <h2>推荐结果</h2>
+            </div>
+            <button id="refreshBtn" class="secondary-action" disabled>换一批</button>
           </div>
           <div id="recommendationList" class="cards empty-state">
             <p>推荐卡片会显示匹配分、理由、建议菜品或行程亮点。</p>

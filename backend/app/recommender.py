@@ -13,7 +13,7 @@ from .geo import haversine_km
 from .models import NearbyPlace, RecommendationItem, RecommendationResponse, RouteResponse, ScoreBreakdown, WeatherResponse
 from .product_providers import get_product_provider
 from .providers import get_place_provider
-from .storage import feedback_summary, save_recommendation_event
+from .storage import feedback_summary, recent_meal_tags as load_recent_meal_tags, save_recommendation_event
 
 
 SCENARIO_KEYWORDS = {
@@ -59,8 +59,14 @@ def recommend(
     health_goals: list[str] | None = None,
     recent_meal_tags: list[str] | None = None,
     travel_style: list[str] | None = None,
+    exclude_item_ids: list[str] | None = None,
+    exclude_item_names: list[str] | None = None,
+    request_payload: dict[str, Any] | None = None,
 ) -> RecommendationResponse:
     dataset = load_dataset()
+    supplied_recent_meal_tags = recent_meal_tags or []
+    stored_recent_meal_tags = [] if supplied_recent_meal_tags else load_recent_meal_tags(user_id)
+    effective_recent_meal_tags = supplied_recent_meal_tags or stored_recent_meal_tags
     user = _build_user_profile(
         _find_user(dataset["users"], user_id),
         budget=budget,
@@ -68,7 +74,7 @@ def recommend(
         avoid=avoid or [],
         allergies=allergies or [],
         health_goals=health_goals or [],
-        recent_meal_tags=recent_meal_tags or [],
+        recent_meal_tags=effective_recent_meal_tags,
         travel_style=travel_style or [],
     )
     intent = parse_intent(message, scenario, location, budget, user, latitude, longitude, radius_km)
@@ -87,17 +93,21 @@ def recommend(
         plan = _build_food_plan(items, health_tags, weather_context)
 
     items = _apply_feedback_profile(items, feedback_profile)
+    items = _exclude_items(items, exclude_item_ids or [], exclude_item_names or [])
     health_summary = _health_summary(health_tags)
     strategy = _strategy_summary(intent.scenario, health_tags)
     aigc_summary, _ = build_life_brief(message, intent.scenario, health_tags)
     request_id = str(uuid4())
+    context = _context_summary(intent, weather_context)
+    context["recent_meal_tags_source"] = "request" if supplied_recent_meal_tags else "runtime-storage"
+    context["recent_meal_tag_count"] = len(effective_recent_meal_tags)
     response = RecommendationResponse(
         request_id=request_id,
         scenario=intent.scenario,
         intent_summary=_intent_summary(intent),
         health_summary=health_summary,
         strategy=strategy,
-        context=_context_summary(intent, weather_context),
+        context=context,
         aigc_summary=aigc_summary,
         recommendations=items[:5],
         plan=plan,
@@ -109,6 +119,24 @@ def recommend(
         user_id=user_id,
         scenario=response.scenario,
         message=message,
+        request_payload=request_payload or _request_payload(
+            message=message,
+            scenario=scenario,
+            user_id=user_id,
+            location=location,
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=radius_km,
+            budget=budget,
+            taste=taste or [],
+            avoid=avoid or [],
+            allergies=allergies or [],
+            health_goals=health_goals or [],
+            recent_meal_tags=effective_recent_meal_tags,
+            travel_style=travel_style or [],
+            exclude_item_ids=exclude_item_ids or [],
+            exclude_item_names=exclude_item_names or [],
+        ),
         context=response.context,
         recommendations=[item.model_dump() for item in response.recommendations],
     )
@@ -692,6 +720,20 @@ def _apply_feedback_profile(items: list[RecommendationItem], profile: dict[str, 
             item.reasons.append("已参考你之前的喜欢/不喜欢/加入计划反馈进行重排。")
         adjusted.append(item)
     return sorted(adjusted, key=lambda candidate: candidate.score, reverse=True)
+
+
+def _exclude_items(items: list[RecommendationItem], item_ids: list[str], item_names: list[str]) -> list[RecommendationItem]:
+    excluded_ids = {str(item_id) for item_id in item_ids}
+    excluded_names = {str(item_name) for item_name in item_names}
+    return [
+        item
+        for item in items
+        if item.id not in excluded_ids and item.name not in excluded_names
+    ]
+
+
+def _request_payload(**kwargs: Any) -> dict[str, Any]:
+    return kwargs
 
 
 def _build_user_profile(

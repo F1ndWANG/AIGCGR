@@ -168,15 +168,25 @@ Invoke-RestMethod `
 
 ## 6. 反馈存储
 
-用户反馈和推荐历史默认保存在：
+用户反馈、推荐历史和饮食记录默认保存在：
 
 ```text
 runtime/liferec.sqlite3
 ```
 
-该目录已被 `.gitignore` 忽略。反馈数据用于后续推荐重排，不会上传到第三方 Provider。
+该目录已被 `.gitignore` 忽略。反馈数据用于后续推荐重排，饮食记录用于健康约束分析，不会上传到第三方 Provider。
 
 Provider 响应缓存也保存在同一个 SQLite 文件中。缓存 key 会剔除 API Key，只按请求 Provider、URL 和非密钥参数生成。
+
+测试饮食记录：
+
+```powershell
+Invoke-RestMethod `
+  -Uri "http://127.0.0.1:8000/api/user/meals" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body '{"user_id":"u001","meal_name":"炸鸡和奶茶","tags":["高油","高糖","蔬菜少"]}'
+```
 
 ## 7. 安全注意事项
 

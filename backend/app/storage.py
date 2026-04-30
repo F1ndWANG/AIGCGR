@@ -22,12 +22,14 @@ def init_storage() -> None:
                 user_id TEXT NOT NULL,
                 scenario TEXT NOT NULL,
                 message TEXT NOT NULL,
+                request_json TEXT NOT NULL DEFAULT '{}',
                 context_json TEXT NOT NULL,
                 recommendations_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
             """
         )
+        _ensure_column(conn, "recommendation_events", "request_json", "TEXT NOT NULL DEFAULT '{}'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS feedback_events (
@@ -56,6 +58,19 @@ def init_storage() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meal_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                meal_name TEXT NOT NULL,
+                tags_json TEXT NOT NULL,
+                note TEXT,
+                meal_time TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def save_recommendation_event(
@@ -63,6 +78,7 @@ def save_recommendation_event(
     user_id: str,
     scenario: str,
     message: str,
+    request_payload: dict[str, Any],
     context: dict[str, Any],
     recommendations: list[dict[str, Any]],
 ) -> None:
@@ -71,19 +87,45 @@ def save_recommendation_event(
         conn.execute(
             """
             INSERT OR REPLACE INTO recommendation_events
-            (request_id, user_id, scenario, message, context_json, recommendations_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (request_id, user_id, scenario, message, request_json, context_json, recommendations_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request_id,
                 user_id,
                 scenario,
                 message,
+                json.dumps(request_payload, ensure_ascii=False),
                 json.dumps(context, ensure_ascii=False),
                 json.dumps(recommendations, ensure_ascii=False),
                 _now(),
             ),
         )
+
+
+def get_recommendation_event(request_id: str) -> dict[str, Any] | None:
+    init_storage()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT request_id, user_id, scenario, message, request_json, context_json, recommendations_json, created_at
+            FROM recommendation_events
+            WHERE request_id = ?
+            """,
+            (request_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return {
+        "request_id": row["request_id"],
+        "user_id": row["user_id"],
+        "scenario": row["scenario"],
+        "message": row["message"],
+        "request": _loads_dict(row["request_json"]),
+        "context": _loads_dict(row["context_json"]),
+        "recommendations": _loads_list_of_dicts(row["recommendations_json"]),
+        "created_at": row["created_at"],
+    }
 
 
 def save_feedback_event(
@@ -157,6 +199,74 @@ def feedback_summary(user_id: str, limit: int = 200) -> dict[str, Any]:
     return profile
 
 
+def save_meal_event(
+    user_id: str,
+    meal_name: str,
+    tags: list[str],
+    note: str | None = None,
+    meal_time: str | None = None,
+) -> int:
+    init_storage()
+    normalized_tags = [tag.strip() for tag in tags if tag and tag.strip()]
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO meal_events
+            (user_id, meal_name, tags_json, note, meal_time, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                meal_name.strip(),
+                json.dumps(normalized_tags, ensure_ascii=False),
+                note,
+                meal_time,
+                _now(),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def meal_history(user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    init_storage()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, meal_name, tags_json, note, meal_time, created_at
+            FROM meal_events
+            WHERE user_id = ?
+            ORDER BY COALESCE(meal_time, created_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "meal_name": row["meal_name"],
+            "tags": _loads_list(row["tags_json"]),
+            "note": row["note"],
+            "meal_time": row["meal_time"],
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
+def recent_meal_tags(user_id: str, limit: int = 20) -> list[str]:
+    tags: list[str] = []
+    for event in meal_history(user_id=user_id, limit=limit):
+        tags.extend(event["tags"])
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for tag in tags:
+        if tag not in seen:
+            deduped.append(tag)
+            seen.add(tag)
+    return deduped
+
+
 def get_cache(cache_key: str) -> dict[str, Any] | None:
     init_storage()
     with _connect() as conn:
@@ -209,11 +319,13 @@ def storage_status() -> dict[str, Any]:
         recommendation_count = conn.execute("SELECT COUNT(*) FROM recommendation_events").fetchone()[0]
         feedback_count = conn.execute("SELECT COUNT(*) FROM feedback_events").fetchone()[0]
         cache_count = conn.execute("SELECT COUNT(*) FROM api_cache").fetchone()[0]
+        meal_count = conn.execute("SELECT COUNT(*) FROM meal_events").fetchone()[0]
     return {
         "database": str(DB_PATH),
         "recommendation_events": recommendation_count,
         "feedback_events": feedback_count,
         "cache_entries": cache_count,
+        "meal_events": meal_count,
     }
 
 
@@ -221,6 +333,12 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _now() -> str:
@@ -235,6 +353,24 @@ def _loads_list(value: str) -> list[str]:
     if not isinstance(data, list):
         return []
     return [str(item) for item in data]
+
+
+def _loads_dict(value: str) -> dict[str, Any]:
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _loads_list_of_dicts(value: str) -> list[dict[str, Any]]:
+    try:
+        data = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
 
 
 def _empty_profile(user_id: str) -> dict[str, Any]:

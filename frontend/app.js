@@ -12,8 +12,12 @@ const scenarioButtons = document.querySelectorAll(".scenario");
 const input = document.querySelector("#messageInput");
 const submitBtn = document.querySelector("#submitBtn");
 const locateBtn = document.querySelector("#locateBtn");
+const refreshBtn = document.querySelector("#refreshBtn");
 const radiusInput = document.querySelector("#radiusInput");
 const recentMealTagsInput = document.querySelector("#recentMealTagsInput");
+const mealNameInput = document.querySelector("#mealNameInput");
+const mealTagsInput = document.querySelector("#mealTagsInput");
+const saveMealBtn = document.querySelector("#saveMealBtn");
 const tasteInput = document.querySelector("#tasteInput");
 const avoidInput = document.querySelector("#avoidInput");
 const travelStyleInput = document.querySelector("#travelStyleInput");
@@ -27,6 +31,7 @@ const recommendationList = document.querySelector("#recommendationList");
 const providerSummary = document.querySelector("#providerSummary");
 
 loadProviderCapabilities();
+loadMealHistory();
 
 scenarioButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -44,6 +49,14 @@ document.querySelectorAll("[data-prompt]").forEach((button) => {
 
 submitBtn.addEventListener("click", async () => {
   await requestRecommendation();
+});
+
+refreshBtn.addEventListener("click", async () => {
+  await refreshRecommendation();
+});
+
+saveMealBtn.addEventListener("click", async () => {
+  await saveMealLog();
 });
 
 locateBtn.addEventListener("click", () => {
@@ -116,8 +129,105 @@ async function requestRecommendation() {
   }
 }
 
+async function refreshRecommendation() {
+  if (!state.requestId) {
+    setStatus("请先生成一次推荐，再使用换一批。", "error");
+    return;
+  }
+
+  refreshBtn.disabled = true;
+  setStatus("正在排除上一批结果并重新生成...", "loading");
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/recommend/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: "u001",
+        request_id: state.requestId,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    renderResult(data);
+    setStatus("已生成替代推荐。", "ready");
+  } catch (error) {
+    setStatus("换一批失败，可能是当前候选不足或后端未启动。", "error");
+    console.error(error);
+  } finally {
+    refreshBtn.disabled = !state.requestId;
+  }
+}
+
+async function saveMealLog() {
+  const mealName = mealNameInput.value.trim();
+  const tags = parseList(mealTagsInput.value);
+  if (!mealName) {
+    setStatus("请输入要记录的饮食名称。", "error");
+    return;
+  }
+  if (!tags.length) {
+    setStatus("请至少填写一个饮食标签，例如高油、高盐、蔬菜少。", "error");
+    return;
+  }
+
+  saveMealBtn.disabled = true;
+  setStatus("正在保存饮食记录...", "loading");
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/user/meals`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: "u001",
+        meal_name: mealName,
+        tags,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    recentMealTagsInput.value = data.recent_meal_tags.join(", ");
+    mealNameInput.value = "";
+    mealTagsInput.value = "";
+    setStatus("饮食记录已保存，下一次推荐会参考真实饮食历史。", "ready");
+  } catch (error) {
+    setStatus("饮食记录保存失败，请确认后端已启动。", "error");
+    console.error(error);
+  } finally {
+    saveMealBtn.disabled = false;
+  }
+}
+
+async function loadMealHistory() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/user/meals?user_id=u001&limit=20`);
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+    const data = await response.json();
+    if (data.recent_meal_tags?.length) {
+      recentMealTagsInput.value = data.recent_meal_tags.join(", ");
+    }
+  } catch (error) {
+    console.debug("Meal history unavailable", error);
+  }
+}
+
 function renderResult(data) {
   state.requestId = data.request_id;
+  refreshBtn.disabled = false;
   intentSummary.textContent = data.intent_summary;
   healthSummary.textContent = `${data.health_summary} ${data.strategy}`;
   aigcSummary.textContent = data.aigc_summary || "未生成 AIGC 摘要。";
@@ -282,6 +392,8 @@ function formatMetaKey(key) {
     provider: "Provider",
     source: "来源",
     data_type: "数据类型",
+    recent_meal_tags_source: "饮食标签来源",
+    recent_meal_tag_count: "饮食标签数",
   };
   return map[key] || key;
 }

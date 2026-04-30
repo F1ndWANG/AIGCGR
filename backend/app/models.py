@@ -23,6 +23,8 @@ class RecommendationRequest(BaseModel):
     health_goals: list[str] = Field(default_factory=list)
     recent_meal_tags: list[str] = Field(default_factory=list)
     travel_style: list[str] = Field(default_factory=list)
+    exclude_item_ids: list[str] = Field(default_factory=list)
+    exclude_item_names: list[str] = Field(default_factory=list)
 
 
 class ScoreBreakdown(BaseModel):
@@ -192,3 +194,41 @@ class FeedbackSummaryResponse(BaseModel):
     positive: dict[str, dict[str, int]]
     negative: dict[str, dict[str, int]]
     events: list[dict[str, str | list[str] | None]]
+
+
+class MealLogRequest(BaseModel):
+    user_id: str = "u001"
+    meal_name: str = Field(..., min_length=1)
+    tags: list[str] = Field(default_factory=list)
+    note: str | None = None
+    meal_time: str | None = None
+
+
+class MealEvent(BaseModel):
+    id: int
+    user_id: str
+    meal_name: str
+    tags: list[str]
+    note: str | None = None
+    meal_time: str | None = None
+    created_at: str
+
+
+class MealLogResponse(BaseModel):
+    id: int
+    status: str
+    message: str
+    recent_meal_tags: list[str]
+
+
+class MealHistoryResponse(BaseModel):
+    user_id: str
+    recent_meal_tags: list[str]
+    meals: list[MealEvent]
+
+
+class RefreshRecommendationRequest(BaseModel):
+    request_id: str
+    user_id: str = "u001"
+    exclude_item_ids: list[str] = Field(default_factory=list)
+    exclude_item_names: list[str] = Field(default_factory=list)

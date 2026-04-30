@@ -250,6 +250,33 @@ textarea {
   color: var(--ink);
 }
 
+.meal-log-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(160px, 1fr) minmax(160px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed rgba(12, 124, 103, 0.38);
+  border-radius: var(--radius);
+  background: rgba(12, 124, 103, 0.06);
+}
+
+.meal-log-panel strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.meal-log-panel input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  background: #fff;
+  color: var(--ink);
+}
+
 .secondary-action {
   border: 1px solid var(--primary);
   border-radius: var(--radius);
@@ -408,6 +435,7 @@ textarea {
   display: flex;
   align-items: end;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .section-heading h2 {
@@ -521,7 +549,8 @@ textarea {
 @media (max-width: 980px) {
   .app-shell,
   .result-grid,
-  .context-grid {
+  .context-grid,
+  .meal-log-panel {
     grid-template-columns: 1fr;
   }
 

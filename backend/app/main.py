@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .aigc import build_life_brief
@@ -11,11 +11,15 @@ from .models import (
     FeedbackRequest,
     FeedbackResponse,
     FeedbackSummaryResponse,
+    MealHistoryResponse,
+    MealLogRequest,
+    MealLogResponse,
     NearbyRequest,
     NearbyResponse,
     PlaceSearchRequest,
     ProductSearchRequest,
     ProductSearchResponse,
+    RefreshRecommendationRequest,
     RecommendationRequest,
     RecommendationResponse,
     ReverseGeocodeResponse,
@@ -26,7 +30,16 @@ from .models import (
 from .product_providers import get_product_provider, product_provider_status
 from .providers import get_place_provider, provider_capabilities
 from .recommender import recommend
-from .storage import feedback_summary, init_storage, save_feedback_event, storage_status
+from .storage import (
+    feedback_summary,
+    get_recommendation_event,
+    init_storage,
+    meal_history,
+    recent_meal_tags,
+    save_feedback_event,
+    save_meal_event,
+    storage_status,
+)
 
 
 @asynccontextmanager
@@ -180,6 +193,33 @@ def get_feedback_summary(user_id: str = "u001") -> FeedbackSummaryResponse:
     return FeedbackSummaryResponse(**feedback_summary(user_id=user_id))
 
 
+@app.post("/api/user/meals", response_model=MealLogResponse)
+def create_meal_log(request: MealLogRequest) -> MealLogResponse:
+    meal_id = save_meal_event(
+        user_id=request.user_id,
+        meal_name=request.meal_name,
+        tags=request.tags,
+        note=request.note,
+        meal_time=request.meal_time,
+    )
+    return MealLogResponse(
+        id=meal_id,
+        status="ok",
+        message="饮食记录已保存，后续推荐会优先参考这些真实生活状态。",
+        recent_meal_tags=recent_meal_tags(user_id=request.user_id),
+    )
+
+
+@app.get("/api/user/meals", response_model=MealHistoryResponse)
+def get_meal_logs(user_id: str = "u001", limit: int = 20) -> MealHistoryResponse:
+    safe_limit = max(1, min(limit, 100))
+    return MealHistoryResponse(
+        user_id=user_id,
+        recent_meal_tags=recent_meal_tags(user_id=user_id, limit=safe_limit),
+        meals=meal_history(user_id=user_id, limit=safe_limit),
+    )
+
+
 @app.post("/api/recommend", response_model=RecommendationResponse)
 def create_recommendation(request: RecommendationRequest) -> RecommendationResponse:
     return recommend(
@@ -197,4 +237,66 @@ def create_recommendation(request: RecommendationRequest) -> RecommendationRespo
         health_goals=request.health_goals,
         recent_meal_tags=request.recent_meal_tags,
         travel_style=request.travel_style,
+        exclude_item_ids=request.exclude_item_ids,
+        exclude_item_names=request.exclude_item_names,
+        request_payload=request.model_dump(),
+    )
+
+
+@app.post("/api/recommend/refresh", response_model=RecommendationResponse)
+def refresh_recommendation(request: RefreshRecommendationRequest) -> RecommendationResponse:
+    event = get_recommendation_event(request.request_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Recommendation request_id not found")
+
+    original = event.get("request") or {}
+    if not original:
+        context = event.get("context") or {}
+        original = {
+            "message": event["message"],
+            "scenario": event["scenario"],
+            "user_id": event["user_id"],
+            "location": context.get("location"),
+            "latitude": context.get("latitude"),
+            "longitude": context.get("longitude"),
+            "radius_km": context.get("radius_km", 3.0),
+        }
+    previous_items = event.get("recommendations") or []
+    exclude_item_ids = {
+        str(item.get("id"))
+        for item in previous_items
+        if item.get("id") is not None
+    }
+    exclude_item_names = {
+        str(item.get("name"))
+        for item in previous_items
+        if item.get("name") is not None
+    }
+    exclude_item_ids.update(request.exclude_item_ids)
+    exclude_item_names.update(request.exclude_item_names)
+
+    refreshed_payload = {
+        **original,
+        "user_id": request.user_id or original.get("user_id", event["user_id"]),
+        "exclude_item_ids": sorted(exclude_item_ids),
+        "exclude_item_names": sorted(exclude_item_names),
+    }
+    return recommend(
+        message=str(refreshed_payload.get("message") or event["message"]),
+        scenario=refreshed_payload.get("scenario", event["scenario"]),
+        user_id=refreshed_payload.get("user_id", event["user_id"]),
+        location=refreshed_payload.get("location"),
+        latitude=refreshed_payload.get("latitude"),
+        longitude=refreshed_payload.get("longitude"),
+        radius_km=refreshed_payload.get("radius_km", 3.0),
+        budget=refreshed_payload.get("budget"),
+        taste=refreshed_payload.get("taste", []),
+        avoid=refreshed_payload.get("avoid", []),
+        allergies=refreshed_payload.get("allergies", []),
+        health_goals=refreshed_payload.get("health_goals", []),
+        recent_meal_tags=refreshed_payload.get("recent_meal_tags", []),
+        travel_style=refreshed_payload.get("travel_style", []),
+        exclude_item_ids=refreshed_payload["exclude_item_ids"],
+        exclude_item_names=refreshed_payload["exclude_item_names"],
+        request_payload=refreshed_payload,
     )

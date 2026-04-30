@@ -30,6 +30,32 @@ def test_feedback_summary_and_cache_use_temp_db(monkeypatch, tmp_path: Path) -> 
     storage.set_cache("cache-key", "amap", {"status": "1", "pois": []}, ttl_seconds=60)
     assert storage.get_cache("cache-key") == {"status": "1", "pois": []}
 
+    storage.save_recommendation_event(
+        request_id="req-refresh",
+        user_id="u-test",
+        scenario="restaurant",
+        message="换一个测试",
+        request_payload={"message": "换一个测试", "scenario": "restaurant", "user_id": "u-test"},
+        context={"weather_source": "amap"},
+        recommendations=[{"id": "poi-1", "name": "测试餐厅"}],
+    )
+    event = storage.get_recommendation_event("req-refresh")
+    assert event is not None
+    assert event["request"]["message"] == "换一个测试"
+    assert event["recommendations"][0]["id"] == "poi-1"
+
+    meal_id = storage.save_meal_event(
+        user_id="u-test",
+        meal_name="炸鸡和奶茶",
+        tags=["高油", "高糖", "蔬菜少"],
+        note="晚餐",
+    )
+    assert meal_id == 1
+    meals = storage.meal_history("u-test")
+    assert meals[0]["meal_name"] == "炸鸡和奶茶"
+    assert meals[0]["tags"] == ["高油", "高糖", "蔬菜少"]
+    assert storage.recent_meal_tags("u-test") == ["高油", "高糖", "蔬菜少"]
+
 
 def test_expired_cache_returns_none(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)

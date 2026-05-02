@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 Scenario = Literal["auto", "diet", "restaurant", "shopping", "travel"]
 ProductProviderName = Literal["auto", "aigc", "local"]
 FeedbackAction = Literal["like", "dislike", "save", "plan", "skip"]
+PlanStatus = Literal["active", "done", "canceled"]
 
 
 class RecommendationRequest(BaseModel):
@@ -22,6 +23,7 @@ class RecommendationRequest(BaseModel):
     allergies: list[str] = Field(default_factory=list)
     health_goals: list[str] = Field(default_factory=list)
     recent_meal_tags: list[str] = Field(default_factory=list)
+    recent_wellness_tags: list[str] = Field(default_factory=list)
     travel_style: list[str] = Field(default_factory=list)
     exclude_item_ids: list[str] = Field(default_factory=list)
     exclude_item_names: list[str] = Field(default_factory=list)
@@ -227,11 +229,97 @@ class MealHistoryResponse(BaseModel):
     meals: list[MealEvent]
 
 
+class WellnessLogRequest(BaseModel):
+    user_id: str = "u001"
+    tags: list[str] = Field(default_factory=list)
+    sleep_hours: float | None = Field(default=None, ge=0, le=24)
+    exercise_minutes: int | None = Field(default=None, ge=0, le=1440)
+    stress_level: int | None = Field(default=None, ge=1, le=5)
+    mood: str | None = None
+    note: str | None = None
+    event_time: str | None = None
+
+
+class WellnessEvent(BaseModel):
+    id: int
+    user_id: str
+    tags: list[str]
+    sleep_hours: float | None = None
+    exercise_minutes: int | None = None
+    stress_level: int | None = None
+    mood: str | None = None
+    note: str | None = None
+    event_time: str | None = None
+    created_at: str
+
+
+class WellnessLogResponse(BaseModel):
+    id: int
+    status: str
+    message: str
+    recent_wellness_tags: list[str]
+
+
+class WellnessHistoryResponse(BaseModel):
+    user_id: str
+    recent_wellness_tags: list[str]
+    wellness: list[WellnessEvent]
+
+
+class UserPreferencesRequest(BaseModel):
+    user_id: str = "u001"
+    default_location: str | None = None
+    default_budget: float | None = Field(default=None, gt=0)
+    taste: list[str] = Field(default_factory=list)
+    avoid: list[str] = Field(default_factory=list)
+    allergies: list[str] = Field(default_factory=list)
+    health_goals: list[str] = Field(default_factory=list)
+    travel_style: list[str] = Field(default_factory=list)
+
+
+class UserPreferencesResponse(UserPreferencesRequest):
+    updated_at: str | None = None
+
+
+class PlanItemRequest(BaseModel):
+    user_id: str = "u001"
+    request_id: str | None = None
+    item_id: str
+    item_name: str
+    item_type: str
+    title: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    source: str | None = None
+    note: str | None = None
+    scheduled_for: str | None = None
+
+
+class PlanItemResponse(PlanItemRequest):
+    id: int
+    status: PlanStatus
+    created_at: str
+    updated_at: str
+
+
+class PlanListResponse(BaseModel):
+    user_id: str
+    plans: list[PlanItemResponse]
+
+
+class PlanStatusUpdateRequest(BaseModel):
+    user_id: str = "u001"
+    status: PlanStatus
+
+
 class UserContextResponse(BaseModel):
     user_id: str
     recent_meal_tags: list[str]
+    recent_wellness_tags: list[str]
     meals: list[MealEvent]
+    wellness: list[WellnessEvent]
     feedback: FeedbackSummaryResponse
+    preferences: UserPreferencesResponse
+    plans: list[PlanItemResponse]
     storage: dict[str, str | int]
     context_sources: dict[str, str]
 

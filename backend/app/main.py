@@ -17,6 +17,10 @@ from .models import (
     NearbyRequest,
     NearbyResponse,
     PlaceSearchRequest,
+    PlanItemRequest,
+    PlanItemResponse,
+    PlanListResponse,
+    PlanStatusUpdateRequest,
     ProductSearchRequest,
     ProductSearchResponse,
     RefreshRecommendationRequest,
@@ -26,6 +30,11 @@ from .models import (
     RouteRequest,
     RouteResponse,
     UserContextResponse,
+    UserPreferencesRequest,
+    UserPreferencesResponse,
+    WellnessHistoryResponse,
+    WellnessLogRequest,
+    WellnessLogResponse,
     WeatherResponse,
 )
 from .product_providers import get_product_provider, product_provider_status
@@ -36,10 +45,18 @@ from .storage import (
     get_recommendation_event,
     init_storage,
     meal_history,
+    plan_items,
     recent_meal_tags,
     save_feedback_event,
     save_meal_event,
+    save_plan_item,
+    save_user_preferences,
     storage_status,
+    update_plan_item_status,
+    user_preferences,
+    recent_wellness_tags,
+    save_wellness_event,
+    wellness_history,
 )
 
 
@@ -221,25 +238,119 @@ def get_meal_logs(user_id: str = "u001", limit: int = 20) -> MealHistoryResponse
     )
 
 
+@app.post("/api/user/wellness", response_model=WellnessLogResponse)
+def create_wellness_log(request: WellnessLogRequest) -> WellnessLogResponse:
+    wellness_id = save_wellness_event(
+        user_id=request.user_id,
+        tags=request.tags,
+        sleep_hours=request.sleep_hours,
+        exercise_minutes=request.exercise_minutes,
+        stress_level=request.stress_level,
+        mood=request.mood,
+        note=request.note,
+        event_time=request.event_time,
+    )
+    return WellnessLogResponse(
+        id=wellness_id,
+        status="ok",
+        message="生活状态已保存，后续推荐会参考这些非医疗生活信号。",
+        recent_wellness_tags=recent_wellness_tags(user_id=request.user_id),
+    )
+
+
+@app.get("/api/user/wellness", response_model=WellnessHistoryResponse)
+def get_wellness_logs(user_id: str = "u001", limit: int = 20) -> WellnessHistoryResponse:
+    safe_limit = max(1, min(limit, 100))
+    return WellnessHistoryResponse(
+        user_id=user_id,
+        recent_wellness_tags=recent_wellness_tags(user_id=user_id, limit=safe_limit),
+        wellness=wellness_history(user_id=user_id, limit=safe_limit),
+    )
+
+
 @app.get("/api/user/context", response_model=UserContextResponse)
 def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextResponse:
     safe_limit = max(1, min(limit, 100))
     feedback = FeedbackSummaryResponse(**feedback_summary(user_id=user_id))
     meals = meal_history(user_id=user_id, limit=safe_limit)
     tags = recent_meal_tags(user_id=user_id, limit=safe_limit)
+    wellness = wellness_history(user_id=user_id, limit=safe_limit)
+    wellness_tags = recent_wellness_tags(user_id=user_id, limit=safe_limit)
+    preferences = UserPreferencesResponse(**user_preferences(user_id=user_id))
+    plans = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="active", limit=10)]
     return UserContextResponse(
         user_id=user_id,
         recent_meal_tags=tags,
+        recent_wellness_tags=wellness_tags,
         meals=meals,
+        wellness=wellness,
         feedback=feedback,
+        preferences=preferences,
+        plans=plans,
         storage=storage_status(),
         context_sources={
             "meals": "runtime.sqlite.meal_events",
+            "wellness": "runtime.sqlite.wellness_events",
             "feedback": "runtime.sqlite.feedback_events",
             "recommendations": "runtime.sqlite.recommendation_events",
             "provider_cache": "runtime.sqlite.api_cache",
+            "preferences": "runtime.sqlite.user_preferences",
+            "plans": "runtime.sqlite.plan_items",
         },
     )
+
+
+@app.get("/api/user/preferences", response_model=UserPreferencesResponse)
+def get_preferences(user_id: str = "u001") -> UserPreferencesResponse:
+    return UserPreferencesResponse(**user_preferences(user_id=user_id))
+
+
+@app.put("/api/user/preferences", response_model=UserPreferencesResponse)
+def update_preferences(request: UserPreferencesRequest) -> UserPreferencesResponse:
+    saved = save_user_preferences(
+        user_id=request.user_id,
+        default_location=request.default_location,
+        default_budget=request.default_budget,
+        taste=request.taste,
+        avoid=request.avoid,
+        allergies=request.allergies,
+        health_goals=request.health_goals,
+        travel_style=request.travel_style,
+    )
+    return UserPreferencesResponse(**saved)
+
+
+@app.post("/api/user/plans", response_model=PlanItemResponse)
+def create_plan_item(request: PlanItemRequest) -> PlanItemResponse:
+    saved = save_plan_item(
+        user_id=request.user_id,
+        request_id=request.request_id,
+        item_id=request.item_id,
+        item_name=request.item_name,
+        item_type=request.item_type,
+        title=request.title,
+        tags=request.tags,
+        source=request.source,
+        note=request.note,
+        scheduled_for=request.scheduled_for,
+    )
+    return PlanItemResponse(**saved)
+
+
+@app.get("/api/user/plans", response_model=PlanListResponse)
+def get_plan_items(user_id: str = "u001", status: str | None = "active", limit: int = 50) -> PlanListResponse:
+    safe_limit = max(1, min(limit, 200))
+    normalized_status = status if status in {"active", "done", "canceled"} else None
+    items = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status=normalized_status, limit=safe_limit)]
+    return PlanListResponse(user_id=user_id, plans=items)
+
+
+@app.patch("/api/user/plans/{plan_id}", response_model=PlanItemResponse)
+def update_plan_status(plan_id: int, request: PlanStatusUpdateRequest) -> PlanItemResponse:
+    updated = update_plan_item_status(plan_id=plan_id, user_id=request.user_id, status=request.status)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Plan item not found")
+    return PlanItemResponse(**updated)
 
 
 @app.post("/api/recommend", response_model=RecommendationResponse)
@@ -258,6 +369,7 @@ def create_recommendation(request: RecommendationRequest) -> RecommendationRespo
         allergies=request.allergies,
         health_goals=request.health_goals,
         recent_meal_tags=request.recent_meal_tags,
+        recent_wellness_tags=request.recent_wellness_tags,
         travel_style=request.travel_style,
         exclude_item_ids=request.exclude_item_ids,
         exclude_item_names=request.exclude_item_names,
@@ -317,6 +429,7 @@ def refresh_recommendation(request: RefreshRecommendationRequest) -> Recommendat
         allergies=refreshed_payload.get("allergies", []),
         health_goals=refreshed_payload.get("health_goals", []),
         recent_meal_tags=refreshed_payload.get("recent_meal_tags", []),
+        recent_wellness_tags=refreshed_payload.get("recent_wellness_tags", []),
         travel_style=refreshed_payload.get("travel_style", []),
         exclude_item_ids=refreshed_payload["exclude_item_ids"],
         exclude_item_names=refreshed_payload["exclude_item_names"],

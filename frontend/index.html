@@ -27,11 +27,66 @@
         <button class="scenario" data-scenario="travel">旅行规划</button>
       </nav>
 
+      <section class="profile-panel user-switcher">
+        <p class="eyebrow">User Scope</p>
+        <h2>当前用户上下文</h2>
+        <label>
+          用户 ID
+          <input id="userIdInput" type="text" value="u001" autocomplete="off">
+        </label>
+        <button id="switchUserBtn" class="secondary-action">切换用户</button>
+        <small>不同用户的饮食、偏好、反馈和计划会分别保存。</small>
+      </section>
+
       <section class="profile-panel">
         <p class="eyebrow">Runtime Context</p>
         <h2>用户记忆由真实操作持续更新</h2>
         <div id="memorySummary" class="memory-summary">
           <span>正在读取用户上下文...</span>
+        </div>
+      </section>
+
+      <section class="profile-panel">
+        <p class="eyebrow">Active Plans</p>
+        <h2>已加入计划的推荐项</h2>
+        <div id="planSummary" class="plan-summary">
+          <span>暂无计划项</span>
+        </div>
+      </section>
+
+      <section class="profile-panel preference-panel">
+        <p class="eyebrow">Long-Term Profile</p>
+        <h2>长期偏好会自动影响后续推荐</h2>
+        <div class="preference-form">
+          <label>
+            默认地点
+            <input id="defaultLocationInput" type="text" placeholder="例如：南京江宁">
+          </label>
+          <label>
+            默认预算
+            <input id="defaultBudgetInput" type="number" min="1" step="1" placeholder="例如：50">
+          </label>
+          <label>
+            常用口味
+            <input id="profileTasteInput" type="text" placeholder="清淡, 高蛋白">
+          </label>
+          <label>
+            长期忌口
+            <input id="profileAvoidInput" type="text" placeholder="油炸, 甜饮">
+          </label>
+          <label>
+            过敏信息
+            <input id="profileAllergiesInput" type="text" placeholder="花生, 海鲜">
+          </label>
+          <label>
+            健康目标
+            <input id="profileHealthGoalsInput" type="text" placeholder="减脂, 控糖">
+          </label>
+          <label>
+            旅行偏好
+            <input id="profileTravelStyleInput" type="text" placeholder="轻松, 自然, 博物馆">
+          </label>
+          <button id="savePreferencesBtn" class="secondary-action">保存长期偏好</button>
         </div>
       </section>
     </aside>
@@ -82,6 +137,17 @@
           <input id="mealNameInput" type="text" placeholder="例如：炸鸡、奶茶、麻辣烫">
           <input id="mealTagsInput" type="text" placeholder="标签：高油 高盐 蔬菜少">
           <button id="saveMealBtn" class="secondary-action">保存饮食</button>
+        </div>
+        <div class="wellness-log-panel" aria-label="记录生活状态">
+          <div>
+            <p class="eyebrow">Wellness Signal</p>
+            <strong>记录睡眠、运动、压力等生活状态</strong>
+          </div>
+          <input id="wellnessTagsInput" type="text" placeholder="标签：睡眠不足 运动不足 压力高">
+          <input id="sleepHoursInput" type="number" min="0" max="24" step="0.5" placeholder="睡眠小时">
+          <input id="exerciseMinutesInput" type="number" min="0" max="1440" step="5" placeholder="运动分钟">
+          <input id="stressLevelInput" type="number" min="1" max="5" step="1" placeholder="压力 1-5">
+          <button id="saveWellnessBtn" class="secondary-action">保存状态</button>
         </div>
         <div class="composer-actions">
           <div class="quick-prompts">

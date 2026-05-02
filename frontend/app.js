@@ -6,9 +6,13 @@ const state = {
   latitude: null,
   longitude: null,
   requestId: null,
+  preferences: null,
+  userId: localStorage.getItem("liferec:userId") || "u001",
 };
 
 const scenarioButtons = document.querySelectorAll(".scenario");
+const userIdInput = document.querySelector("#userIdInput");
+const switchUserBtn = document.querySelector("#switchUserBtn");
 const input = document.querySelector("#messageInput");
 const submitBtn = document.querySelector("#submitBtn");
 const locateBtn = document.querySelector("#locateBtn");
@@ -18,9 +22,22 @@ const recentMealTagsInput = document.querySelector("#recentMealTagsInput");
 const mealNameInput = document.querySelector("#mealNameInput");
 const mealTagsInput = document.querySelector("#mealTagsInput");
 const saveMealBtn = document.querySelector("#saveMealBtn");
+const wellnessTagsInput = document.querySelector("#wellnessTagsInput");
+const sleepHoursInput = document.querySelector("#sleepHoursInput");
+const exerciseMinutesInput = document.querySelector("#exerciseMinutesInput");
+const stressLevelInput = document.querySelector("#stressLevelInput");
+const saveWellnessBtn = document.querySelector("#saveWellnessBtn");
 const tasteInput = document.querySelector("#tasteInput");
 const avoidInput = document.querySelector("#avoidInput");
 const travelStyleInput = document.querySelector("#travelStyleInput");
+const defaultLocationInput = document.querySelector("#defaultLocationInput");
+const defaultBudgetInput = document.querySelector("#defaultBudgetInput");
+const profileTasteInput = document.querySelector("#profileTasteInput");
+const profileAvoidInput = document.querySelector("#profileAvoidInput");
+const profileAllergiesInput = document.querySelector("#profileAllergiesInput");
+const profileHealthGoalsInput = document.querySelector("#profileHealthGoalsInput");
+const profileTravelStyleInput = document.querySelector("#profileTravelStyleInput");
+const savePreferencesBtn = document.querySelector("#savePreferencesBtn");
 const locationStatus = document.querySelector("#locationStatus");
 const statusPanel = document.querySelector("#statusPanel");
 const intentSummary = document.querySelector("#intentSummary");
@@ -30,7 +47,9 @@ const planList = document.querySelector("#planList");
 const recommendationList = document.querySelector("#recommendationList");
 const providerSummary = document.querySelector("#providerSummary");
 const memorySummary = document.querySelector("#memorySummary");
+const planSummary = document.querySelector("#planSummary");
 
+userIdInput.value = state.userId;
 loadProviderCapabilities();
 loadUserContext();
 
@@ -58,6 +77,24 @@ refreshBtn.addEventListener("click", async () => {
 
 saveMealBtn.addEventListener("click", async () => {
   await saveMealLog();
+});
+
+saveWellnessBtn.addEventListener("click", async () => {
+  await saveWellnessLog();
+});
+
+savePreferencesBtn.addEventListener("click", async () => {
+  await savePreferences();
+});
+
+switchUserBtn.addEventListener("click", async () => {
+  await switchUser();
+});
+
+userIdInput.addEventListener("keydown", async (event) => {
+  if (event.key === "Enter") {
+    await switchUser();
+  }
 });
 
 locateBtn.addEventListener("click", () => {
@@ -103,15 +140,18 @@ async function requestRecommendation() {
       body: JSON.stringify({
         message,
         scenario: state.scenario,
-        user_id: "u001",
+        user_id: currentUserId(),
         latitude: state.latitude,
         longitude: state.longitude,
         radius_km: Number(radiusInput.value || 3),
         recent_meal_tags: parseList(recentMealTagsInput.value),
-        taste: parseList(tasteInput.value),
-        avoid: parseList(avoidInput.value),
-        allergies: parseList(avoidInput.value),
-        travel_style: parseList(travelStyleInput.value),
+        location: defaultLocationInput.value.trim() || null,
+        budget: defaultBudgetInput.value ? Number(defaultBudgetInput.value) : null,
+        taste: mergeLists(parseList(tasteInput.value), parseList(profileTasteInput.value)),
+        avoid: mergeLists(parseList(avoidInput.value), parseList(profileAvoidInput.value)),
+        allergies: mergeLists(parseList(avoidInput.value), parseList(profileAllergiesInput.value)),
+        health_goals: parseList(profileHealthGoalsInput.value),
+        travel_style: mergeLists(parseList(travelStyleInput.value), parseList(profileTravelStyleInput.value)),
       }),
     });
 
@@ -146,7 +186,7 @@ async function refreshRecommendation() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        user_id: "u001",
+        user_id: currentUserId(),
         request_id: state.requestId,
       }),
     });
@@ -188,7 +228,7 @@ async function saveMealLog() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        user_id: "u001",
+        user_id: currentUserId(),
         meal_name: mealName,
         tags,
       }),
@@ -212,9 +252,128 @@ async function saveMealLog() {
   }
 }
 
+async function saveWellnessLog() {
+  const tags = parseList(wellnessTagsInput.value);
+  const sleepHours = sleepHoursInput.value ? Number(sleepHoursInput.value) : null;
+  const exerciseMinutes = exerciseMinutesInput.value ? Number(exerciseMinutesInput.value) : null;
+  const stressLevel = stressLevelInput.value ? Number(stressLevelInput.value) : null;
+  if (!tags.length && sleepHours === null && exerciseMinutes === null && stressLevel === null) {
+    setStatus("请至少填写一个生活状态标签或数值。", "error");
+    return;
+  }
+
+  saveWellnessBtn.disabled = true;
+  setStatus("正在保存生活状态...", "loading");
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/user/wellness`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: currentUserId(),
+        tags,
+        sleep_hours: sleepHours,
+        exercise_minutes: exerciseMinutes,
+        stress_level: stressLevel,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+
+    wellnessTagsInput.value = "";
+    sleepHoursInput.value = "";
+    exerciseMinutesInput.value = "";
+    stressLevelInput.value = "";
+    await loadUserContext();
+    setStatus("生活状态已保存，后续推荐会参考这些信号。", "ready");
+  } catch (error) {
+    setStatus("生活状态保存失败，请确认后端已启动。", "error");
+    console.error(error);
+  } finally {
+    saveWellnessBtn.disabled = false;
+  }
+}
+
+async function savePreferences() {
+  savePreferencesBtn.disabled = true;
+  setStatus("正在保存长期偏好...", "loading");
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/user/preferences`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: currentUserId(),
+        default_location: defaultLocationInput.value.trim() || null,
+        default_budget: defaultBudgetInput.value ? Number(defaultBudgetInput.value) : null,
+        taste: parseList(profileTasteInput.value),
+        avoid: parseList(profileAvoidInput.value),
+        allergies: parseList(profileAllergiesInput.value),
+        health_goals: parseList(profileHealthGoalsInput.value),
+        travel_style: parseList(profileTravelStyleInput.value),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    state.preferences = data;
+    fillPreferenceInputs(data);
+    await loadUserContext();
+    setStatus("长期偏好已保存，后续推荐会自动使用。", "ready");
+  } catch (error) {
+    setStatus("长期偏好保存失败，请确认后端已启动。", "error");
+    console.error(error);
+  } finally {
+    savePreferencesBtn.disabled = false;
+  }
+}
+
+async function switchUser() {
+  const nextUserId = userIdInput.value.trim() || "u001";
+  state.userId = nextUserId;
+  state.requestId = null;
+  state.preferences = null;
+  localStorage.setItem("liferec:userId", nextUserId);
+  refreshBtn.disabled = true;
+  clearUserScopedInputs();
+  setStatus(`已切换到用户 ${nextUserId}，正在读取上下文...`, "loading");
+  await loadUserContext();
+  setStatus(`当前用户：${nextUserId}`, "ready");
+}
+
+function currentUserId() {
+  return state.userId || "u001";
+}
+
+function clearUserScopedInputs() {
+  recentMealTagsInput.value = "";
+  defaultLocationInput.value = "";
+  defaultBudgetInput.value = "";
+  profileTasteInput.value = "";
+  profileAvoidInput.value = "";
+  profileAllergiesInput.value = "";
+  profileHealthGoalsInput.value = "";
+  profileTravelStyleInput.value = "";
+  wellnessTagsInput.value = "";
+  sleepHoursInput.value = "";
+  exerciseMinutesInput.value = "";
+  stressLevelInput.value = "";
+  planSummary.innerHTML = "<span>正在读取计划...</span>";
+  memorySummary.innerHTML = "<span>正在读取用户上下文...</span>";
+}
+
 async function loadMealHistory() {
   try {
-    const response = await fetch(`${API_BASE_URL}/user/meals?user_id=u001&limit=20`);
+    const response = await fetch(`${API_BASE_URL}/user/meals?user_id=${encodeURIComponent(currentUserId())}&limit=20`);
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
@@ -229,12 +388,16 @@ async function loadMealHistory() {
 
 async function loadUserContext() {
   try {
-    const response = await fetch(`${API_BASE_URL}/user/context?user_id=u001&limit=20`);
+    const response = await fetch(`${API_BASE_URL}/user/context?user_id=${encodeURIComponent(currentUserId())}&limit=20`);
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
     const data = await response.json();
+    state.preferences = data.preferences || null;
     renderUserContext(data);
+    if (data.preferences) {
+      fillPreferenceInputs(data.preferences);
+    }
     if (data.recent_meal_tags?.length) {
       recentMealTagsInput.value = data.recent_meal_tags.join(", ");
     }
@@ -248,18 +411,67 @@ async function loadUserContext() {
 function renderUserContext(data) {
   const positiveEvents = data.feedback?.events?.filter((event) => ["like", "save", "plan"].includes(event.action)).length || 0;
   const negativeEvents = data.feedback?.events?.filter((event) => ["dislike", "skip"].includes(event.action)).length || 0;
-  const tags = data.recent_meal_tags?.length
+  const mealTags = data.recent_meal_tags?.length
     ? data.recent_meal_tags.slice(0, 6).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")
     : "<span>暂无饮食标签</span>";
+  const wellnessTags = data.recent_wellness_tags?.length
+    ? data.recent_wellness_tags.slice(0, 6).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")
+    : "<span>暂无生活状态</span>";
+  const preferenceCount = countPreferences(data.preferences);
 
   memorySummary.innerHTML = `
     <div class="memory-stats">
       <strong>${data.meals?.length || 0}</strong><small>饮食记录</small>
+      <strong>${data.wellness?.length || 0}</strong><small>生活状态</small>
       <strong>${positiveEvents}</strong><small>正反馈</small>
-      <strong>${negativeEvents}</strong><small>负反馈</small>
     </div>
-    <div class="profile-tags">${tags}</div>
+    <div class="memory-stats">
+      <strong>${negativeEvents}</strong><small>负反馈</small>
+      <strong>${preferenceCount}</strong><small>长期偏好</small>
+    </div>
+    <div class="profile-tags">${mealTags}</div>
+    <div class="profile-tags wellness-tags">${wellnessTags}</div>
   `;
+  renderPlanSummary(data.plans || []);
+}
+
+function fillPreferenceInputs(preferences) {
+  defaultLocationInput.value = preferences.default_location || "";
+  defaultBudgetInput.value = preferences.default_budget || "";
+  profileTasteInput.value = (preferences.taste || []).join(", ");
+  profileAvoidInput.value = (preferences.avoid || []).join(", ");
+  profileAllergiesInput.value = (preferences.allergies || []).join(", ");
+  profileHealthGoalsInput.value = (preferences.health_goals || []).join(", ");
+  profileTravelStyleInput.value = (preferences.travel_style || []).join(", ");
+}
+
+function renderPlanSummary(plans) {
+  if (!plans.length) {
+    planSummary.innerHTML = "<span>暂无计划项</span>";
+    return;
+  }
+
+  planSummary.innerHTML = "";
+  plans.slice(0, 8).forEach((plan) => {
+    const chip = document.createElement("article");
+    chip.className = "plan-chip";
+    chip.innerHTML = `
+      <div>
+        <strong>${escapeHtml(plan.title || plan.item_name)}</strong>
+        <small>${escapeHtml(plan.item_type)} · ${escapeHtml(plan.source || "unknown")}</small>
+      </div>
+      <div class="plan-actions">
+        <button data-status="done">完成</button>
+        <button data-status="canceled">取消</button>
+      </div>
+    `;
+    chip.querySelectorAll("[data-status]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        await updatePlanStatus(plan.id, button.dataset.status, button);
+      });
+    });
+    planSummary.appendChild(chip);
+  });
 }
 
 function renderResult(data) {
@@ -374,7 +586,7 @@ async function sendFeedback(item, action, button) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        user_id: "u001",
+        user_id: currentUserId(),
         request_id: state.requestId,
         item_id: item.id,
         item_name: item.name,
@@ -387,12 +599,64 @@ async function sendFeedback(item, action, button) {
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
+    if (action === "plan") {
+      await savePlanItem(item);
+    }
     button.textContent = "已记录";
     await loadUserContext();
-    setStatus("反馈已保存，下一次推荐会参考你的偏好。", "ready");
+    setStatus(action === "plan" ? "已加入计划，后续可以在侧栏查看。" : "反馈已保存，下一次推荐会参考你的偏好。", "ready");
   } catch (error) {
     button.disabled = false;
     setStatus("反馈保存失败，请确认后端已启动。", "error");
+    console.error(error);
+  }
+}
+
+async function savePlanItem(item) {
+  const response = await fetch(`${API_BASE_URL}/user/plans`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      user_id: currentUserId(),
+      request_id: state.requestId,
+      item_id: item.id,
+      item_name: item.name,
+      item_type: item.type,
+      title: item.name,
+      tags: item.tags,
+      source: item.meta?.source || item.meta?.provider || "unknown",
+      note: item.reasons?.[0] || null,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Plan API returned ${response.status}`);
+  }
+  return response.json();
+}
+
+async function updatePlanStatus(planId, status, button) {
+  button.disabled = true;
+  try {
+    const response = await fetch(`${API_BASE_URL}/user/plans/${planId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: currentUserId(),
+        status,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Plan status API returned ${response.status}`);
+    }
+    await loadUserContext();
+    setStatus(status === "done" ? "计划已标记完成。" : "计划已取消。", "ready");
+  } catch (error) {
+    button.disabled = false;
+    setStatus("计划状态更新失败，请确认后端已启动。", "error");
     console.error(error);
   }
 }
@@ -441,6 +705,30 @@ function parseList(value) {
     .split(/[,，、\s]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function mergeLists(primary, fallback) {
+  const seen = new Set();
+  return [...primary, ...fallback].filter((item) => {
+    if (seen.has(item)) {
+      return false;
+    }
+    seen.add(item);
+    return true;
+  });
+}
+
+function countPreferences(preferences) {
+  if (!preferences) {
+    return 0;
+  }
+  let count = 0;
+  if (preferences.default_location) count += 1;
+  if (preferences.default_budget) count += 1;
+  ["taste", "avoid", "allergies", "health_goals", "travel_style"].forEach((key) => {
+    count += preferences[key]?.length || 0;
+  });
+  return count;
 }
 
 function escapeHtml(value) {

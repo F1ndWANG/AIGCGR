@@ -77,3 +77,57 @@ def test_recommend_uses_runtime_meal_tags_when_request_is_empty(monkeypatch, tmp
     assert response.context["recent_meal_tags_source"] == "runtime-storage"
     assert response.context["recent_meal_tag_count"] == 1
     assert "高油" in response.health_summary
+
+
+def test_recommend_uses_runtime_wellness_tags_when_request_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "liferec-test.sqlite3")
+    monkeypatch.setattr(recommender, "settings", SimpleNamespace(strict_real_data=True, amap_api_key=None))
+
+    storage.save_wellness_event(
+        user_id="u-wellness",
+        tags=["睡眠不足", "压力高"],
+        sleep_hours=5,
+        stress_level=4,
+    )
+
+    response = recommender.recommend(
+        message="今天想吃舒服一点",
+        scenario="restaurant",
+        user_id="u-wellness",
+        recent_meal_tags=[],
+        recent_wellness_tags=[],
+    )
+
+    assert response.context["recent_wellness_tags_source"] == "runtime-storage"
+    assert response.context["recent_wellness_tag_count"] == 2
+    assert "睡眠不足" in response.health_summary
+    assert "压力高" in response.health_summary
+
+
+def test_recommend_uses_stored_preferences_when_request_is_empty(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "liferec-test.sqlite3")
+    monkeypatch.setattr(recommender, "settings", SimpleNamespace(strict_real_data=True, amap_api_key=None))
+
+    storage.save_user_preferences(
+        user_id="u-pref",
+        default_location="南京江宁",
+        default_budget=42,
+        taste=["清淡"],
+        avoid=["油炸"],
+        allergies=[],
+        health_goals=["减脂"],
+        travel_style=["轻松"],
+    )
+
+    response = recommender.recommend(
+        message="今天晚上吃什么",
+        scenario="restaurant",
+        user_id="u-pref",
+    )
+
+    assert response.context["preferences_source"] == "runtime-storage"
+    assert response.context["stored_preference_count"] == 6
+    assert "地点：南京江宁" in response.intent_summary
+    assert "预算：42 元" in response.intent_summary

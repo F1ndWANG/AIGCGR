@@ -71,6 +71,58 @@ def init_storage() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_id TEXT PRIMARY KEY,
+                default_location TEXT,
+                default_budget REAL,
+                taste_json TEXT NOT NULL DEFAULT '[]',
+                avoid_json TEXT NOT NULL DEFAULT '[]',
+                allergies_json TEXT NOT NULL DEFAULT '[]',
+                health_goals_json TEXT NOT NULL DEFAULT '[]',
+                travel_style_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS wellness_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                tags_json TEXT NOT NULL,
+                sleep_hours REAL,
+                exercise_minutes INTEGER,
+                stress_level INTEGER,
+                mood TEXT,
+                note TEXT,
+                event_time TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS plan_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                request_id TEXT,
+                item_id TEXT NOT NULL,
+                item_name TEXT NOT NULL,
+                item_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                tags_json TEXT NOT NULL,
+                source TEXT,
+                note TEXT,
+                scheduled_for TEXT,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def save_recommendation_event(
@@ -267,6 +319,273 @@ def recent_meal_tags(user_id: str, limit: int = 20) -> list[str]:
     return deduped
 
 
+def save_wellness_event(
+    user_id: str,
+    tags: list[str],
+    sleep_hours: float | None = None,
+    exercise_minutes: int | None = None,
+    stress_level: int | None = None,
+    mood: str | None = None,
+    note: str | None = None,
+    event_time: str | None = None,
+) -> int:
+    init_storage()
+    normalized_tags = _normalize_tags(tags)
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO wellness_events
+            (user_id, tags_json, sleep_hours, exercise_minutes, stress_level, mood, note, event_time, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                json.dumps(normalized_tags, ensure_ascii=False),
+                sleep_hours,
+                exercise_minutes,
+                stress_level,
+                _clean_text(mood),
+                _clean_text(note),
+                _clean_text(event_time),
+                _now(),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def wellness_history(user_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    init_storage()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, tags_json, sleep_hours, exercise_minutes, stress_level,
+                   mood, note, event_time, created_at
+            FROM wellness_events
+            WHERE user_id = ?
+            ORDER BY COALESCE(event_time, created_at) DESC, id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "user_id": row["user_id"],
+            "tags": _loads_list(row["tags_json"]),
+            "sleep_hours": row["sleep_hours"],
+            "exercise_minutes": row["exercise_minutes"],
+            "stress_level": row["stress_level"],
+            "mood": row["mood"],
+            "note": row["note"],
+            "event_time": row["event_time"],
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
+def recent_wellness_tags(user_id: str, limit: int = 20) -> list[str]:
+    tags: list[str] = []
+    for event in wellness_history(user_id=user_id, limit=limit):
+        tags.extend(event["tags"])
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for tag in tags:
+        if tag not in seen:
+            deduped.append(tag)
+            seen.add(tag)
+    return deduped
+
+
+def save_user_preferences(
+    user_id: str,
+    default_location: str | None,
+    default_budget: float | None,
+    taste: list[str],
+    avoid: list[str],
+    allergies: list[str],
+    health_goals: list[str],
+    travel_style: list[str],
+) -> dict[str, Any]:
+    init_storage()
+    existing = user_preferences(user_id)
+    created_at = existing.get("created_at") or _now()
+    updated_at = _now()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO user_preferences
+            (user_id, default_location, default_budget, taste_json, avoid_json, allergies_json,
+             health_goals_json, travel_style_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                _clean_text(default_location),
+                default_budget,
+                json.dumps(_normalize_tags(taste), ensure_ascii=False),
+                json.dumps(_normalize_tags(avoid), ensure_ascii=False),
+                json.dumps(_normalize_tags(allergies), ensure_ascii=False),
+                json.dumps(_normalize_tags(health_goals), ensure_ascii=False),
+                json.dumps(_normalize_tags(travel_style), ensure_ascii=False),
+                created_at,
+                updated_at,
+            ),
+        )
+    return user_preferences(user_id)
+
+
+def user_preferences(user_id: str) -> dict[str, Any]:
+    init_storage()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT user_id, default_location, default_budget, taste_json, avoid_json,
+                   allergies_json, health_goals_json, travel_style_json, updated_at, created_at
+            FROM user_preferences
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+    if not row:
+        return _empty_preferences(user_id)
+    return {
+        "user_id": row["user_id"],
+        "default_location": row["default_location"],
+        "default_budget": row["default_budget"],
+        "taste": _loads_list(row["taste_json"]),
+        "avoid": _loads_list(row["avoid_json"]),
+        "allergies": _loads_list(row["allergies_json"]),
+        "health_goals": _loads_list(row["health_goals_json"]),
+        "travel_style": _loads_list(row["travel_style_json"]),
+        "updated_at": row["updated_at"],
+        "created_at": row["created_at"],
+    }
+
+
+def save_plan_item(
+    user_id: str,
+    request_id: str | None,
+    item_id: str,
+    item_name: str,
+    item_type: str,
+    title: str | None,
+    tags: list[str],
+    source: str | None,
+    note: str | None = None,
+    scheduled_for: str | None = None,
+) -> dict[str, Any]:
+    init_storage()
+    normalized_title = _clean_text(title) or item_name.strip()
+    normalized_tags = _normalize_tags(tags)
+    now = _now()
+    with _connect() as conn:
+        existing = conn.execute(
+            """
+            SELECT id, user_id, request_id, item_id, item_name, item_type, title, tags_json,
+                   source, note, scheduled_for, status, created_at, updated_at
+            FROM plan_items
+            WHERE user_id = ? AND item_id = ? AND status = 'active'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (user_id, item_id),
+        ).fetchone()
+        if existing:
+            return _plan_row_to_dict(existing)
+
+        cursor = conn.execute(
+            """
+            INSERT INTO plan_items
+            (user_id, request_id, item_id, item_name, item_type, title, tags_json, source,
+             note, scheduled_for, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+            """,
+            (
+                user_id,
+                request_id,
+                item_id,
+                item_name.strip(),
+                item_type,
+                normalized_title,
+                json.dumps(normalized_tags, ensure_ascii=False),
+                source,
+                _clean_text(note),
+                _clean_text(scheduled_for),
+                now,
+                now,
+            ),
+        )
+        plan_id = int(cursor.lastrowid)
+    plan = get_plan_item(plan_id=plan_id, user_id=user_id)
+    if plan is None:
+        raise RuntimeError("Plan item was not persisted")
+    return plan
+
+
+def get_plan_item(plan_id: int, user_id: str) -> dict[str, Any] | None:
+    init_storage()
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, user_id, request_id, item_id, item_name, item_type, title, tags_json,
+                   source, note, scheduled_for, status, created_at, updated_at
+            FROM plan_items
+            WHERE id = ? AND user_id = ?
+            """,
+            (plan_id, user_id),
+        ).fetchone()
+    return _plan_row_to_dict(row) if row else None
+
+
+def plan_items(user_id: str, status: str | None = "active", limit: int = 50) -> list[dict[str, Any]]:
+    init_storage()
+    safe_limit = max(1, min(limit, 200))
+    with _connect() as conn:
+        if status:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, request_id, item_id, item_name, item_type, title, tags_json,
+                       source, note, scheduled_for, status, created_at, updated_at
+                FROM plan_items
+                WHERE user_id = ? AND status = ?
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (user_id, status, safe_limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, request_id, item_id, item_name, item_type, title, tags_json,
+                       source, note, scheduled_for, status, created_at, updated_at
+                FROM plan_items
+                WHERE user_id = ?
+                ORDER BY updated_at DESC, id DESC
+                LIMIT ?
+                """,
+                (user_id, safe_limit),
+            ).fetchall()
+    return [_plan_row_to_dict(row) for row in rows]
+
+
+def update_plan_item_status(plan_id: int, user_id: str, status: str) -> dict[str, Any] | None:
+    init_storage()
+    updated_at = _now()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE plan_items
+            SET status = ?, updated_at = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (status, updated_at, plan_id, user_id),
+        )
+        if cursor.rowcount == 0:
+            return None
+    return get_plan_item(plan_id=plan_id, user_id=user_id)
+
+
 def get_cache(cache_key: str) -> dict[str, Any] | None:
     init_storage()
     with _connect() as conn:
@@ -320,12 +639,18 @@ def storage_status() -> dict[str, Any]:
         feedback_count = conn.execute("SELECT COUNT(*) FROM feedback_events").fetchone()[0]
         cache_count = conn.execute("SELECT COUNT(*) FROM api_cache").fetchone()[0]
         meal_count = conn.execute("SELECT COUNT(*) FROM meal_events").fetchone()[0]
+        preference_count = conn.execute("SELECT COUNT(*) FROM user_preferences").fetchone()[0]
+        wellness_count = conn.execute("SELECT COUNT(*) FROM wellness_events").fetchone()[0]
+        plan_count = conn.execute("SELECT COUNT(*) FROM plan_items").fetchone()[0]
     return {
         "database": str(DB_PATH),
         "recommendation_events": recommendation_count,
         "feedback_events": feedback_count,
         "cache_entries": cache_count,
         "meal_events": meal_count,
+        "user_preferences": preference_count,
+        "wellness_events": wellness_count,
+        "plan_items": plan_count,
     }
 
 
@@ -355,6 +680,24 @@ def _loads_list(value: str) -> list[str]:
     return [str(item) for item in data]
 
 
+def _normalize_tags(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in values:
+        item = value.strip()
+        if item and item not in seen:
+            normalized.append(item)
+            seen.add(item)
+    return normalized
+
+
+def _clean_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _loads_dict(value: str) -> dict[str, Any]:
     try:
         data = json.loads(value)
@@ -373,10 +716,44 @@ def _loads_list_of_dicts(value: str) -> list[dict[str, Any]]:
     return [item for item in data if isinstance(item, dict)]
 
 
+def _plan_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "user_id": row["user_id"],
+        "request_id": row["request_id"],
+        "item_id": row["item_id"],
+        "item_name": row["item_name"],
+        "item_type": row["item_type"],
+        "title": row["title"],
+        "tags": _loads_list(row["tags_json"]),
+        "source": row["source"],
+        "note": row["note"],
+        "scheduled_for": row["scheduled_for"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
 def _empty_profile(user_id: str) -> dict[str, Any]:
     return {
         "user_id": user_id,
         "positive": {"items": {}, "tags": {}},
         "negative": {"items": {}, "tags": {}},
         "events": [],
+    }
+
+
+def _empty_preferences(user_id: str) -> dict[str, Any]:
+    return {
+        "user_id": user_id,
+        "default_location": None,
+        "default_budget": None,
+        "taste": [],
+        "avoid": [],
+        "allergies": [],
+        "health_goals": [],
+        "travel_style": [],
+        "updated_at": None,
+        "created_at": None,
     }

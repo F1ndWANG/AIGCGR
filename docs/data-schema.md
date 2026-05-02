@@ -29,13 +29,16 @@
 
 ## 运行时数据
 
-`runtime/liferec.sqlite3` 保存推荐历史、用户反馈、用户饮食记录和 Provider 响应缓存。该数据来自用户真实操作或真实 API 响应，不属于静态样例数据，默认不提交到 Git。
+`runtime/liferec.sqlite3` 保存推荐历史、用户反馈、用户饮食记录、生活状态记录、长期用户偏好和 Provider 响应缓存。该数据来自用户真实操作或真实 API 响应，不属于静态样例数据，默认不提交到 Git。
 
 主要运行时表：
 
 - `recommendation_events`：保存 `request_id`、原始推荐请求、上下文和已展示结果，用于“换一批”和评估。
 - `feedback_events`：保存用户对推荐项的喜欢、不喜欢、加入计划等行为，用于后续重排。
 - `meal_events`：保存用户手动记录的餐食名称、饮食标签、备注和时间，用于推断近期健康约束。
+- `wellness_events`：保存用户手动记录的睡眠、运动、压力和生活状态标签，用于一般生活推荐约束。
+- `user_preferences`：保存默认地点、默认预算、口味、忌口、过敏、健康目标和旅行偏好，用于补全后续推荐上下文。
+- `plan_items`：保存用户从推荐卡片加入的行动计划项，支持 active、done、canceled 状态；前端可直接将 active 计划标记为完成或取消。
 - `api_cache`：保存高德等 Provider 响应缓存，缓存 key 会去除 API Key。
 
 饮食记录示例：
@@ -50,3 +53,84 @@
 ```
 
 当推荐请求没有显式传入 `recent_meal_tags` 时，后端会自动读取 `meal_events` 中该用户最近的饮食标签；如果请求中传入了标签，则以本次请求为准。
+
+生活状态记录示例：
+
+```json
+{
+  "user_id": "u001",
+  "tags": ["睡眠不足", "压力高"],
+  "sleep_hours": 5.5,
+  "exercise_minutes": 10,
+  "stress_level": 4,
+  "mood": "疲惫",
+  "note": "期末周"
+}
+```
+
+相关接口：
+
+```text
+POST /api/user/wellness
+GET /api/user/wellness
+GET /api/user/context
+```
+
+当推荐请求没有显式传入 `recent_wellness_tags` 时，后端会自动读取 `wellness_events` 中该用户最近的生活状态标签，例如睡眠不足、运动不足、压力高。该能力只用于一般生活方式建议，不提供医疗诊断。
+
+长期偏好示例：
+
+```json
+{
+  "user_id": "u001",
+  "default_location": "南京江宁",
+  "default_budget": 50,
+  "taste": ["清淡", "高蛋白"],
+  "avoid": ["油炸"],
+  "allergies": ["花生"],
+  "health_goals": ["减脂"],
+  "travel_style": ["轻松", "自然"]
+}
+```
+
+相关接口：
+
+```text
+GET /api/user/preferences
+PUT /api/user/preferences
+GET /api/user/context
+```
+
+当推荐请求没有显式传入地点、预算、口味、忌口、过敏、健康目标或旅行偏好时，后端会自动读取 `user_preferences` 中该用户保存的长期画像。
+
+计划项示例：
+
+```json
+{
+  "user_id": "u001",
+  "request_id": "recommendation-request-id",
+  "item_id": "B0IA3YONKY",
+  "item_name": "黄焖鸡米饭(方山熙园店)",
+  "item_type": "restaurant",
+  "title": "今晚去黄焖鸡米饭(方山熙园店)",
+  "tags": ["餐饮服务", "快餐厅"],
+  "source": "amap",
+  "note": "来自真实高德地点数据"
+}
+```
+
+相关接口：
+
+```text
+POST /api/user/plans
+GET /api/user/plans
+PATCH /api/user/plans/{plan_id}
+```
+
+计划状态：
+
+- `active`：当前待执行计划。
+- `done`：已完成。
+- `canceled`：已取消。
+
+`GET /api/user/context` 默认只返回 active 计划，用于前端侧栏展示当前待执行事项；历史计划可通过 `GET /api/user/plans?status=done` 或 `status=canceled` 查询。

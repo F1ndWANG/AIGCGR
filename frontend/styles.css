@@ -120,6 +120,63 @@ button {
   line-height: 1.45;
 }
 
+.preference-panel {
+  margin-top: 18px;
+}
+
+.user-switcher {
+  margin-top: 18px;
+}
+
+.user-switcher label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.user-switcher input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 9px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.user-switcher button {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.user-switcher small {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.preference-form {
+  display: grid;
+  gap: 10px;
+}
+
+.preference-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.preference-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 9px;
+  background: #fff;
+  color: var(--ink);
+}
+
 .profile-tags {
   display: flex;
   flex-wrap: wrap;
@@ -141,15 +198,69 @@ button {
   gap: 12px;
 }
 
-.memory-summary > span {
+.memory-summary > span,
+.plan-summary > span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.plan-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-chip {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.plan-chip strong,
+.plan-chip small {
+  display: block;
+}
+
+.plan-chip strong {
+  font-size: 14px;
+}
+
+.plan-chip small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.plan-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.plan-actions button {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--muted);
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.plan-actions button:hover {
+  border-color: var(--primary);
+  color: var(--primary-dark);
 }
 
 .memory-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
+}
+
+.memory-stats.single-stat {
+  grid-template-columns: 1fr;
 }
 
 .memory-stats strong,
@@ -303,13 +414,27 @@ textarea {
   background: rgba(12, 124, 103, 0.06);
 }
 
-.meal-log-panel strong {
+.wellness-log-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.3fr) minmax(180px, 1.4fr) repeat(3, minmax(100px, 0.8fr)) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed rgba(216, 91, 58, 0.36);
+  border-radius: var(--radius);
+  background: rgba(216, 91, 58, 0.06);
+}
+
+.meal-log-panel strong,
+.wellness-log-panel strong {
   display: block;
   margin-top: 4px;
   font-size: 14px;
 }
 
-.meal-log-panel input {
+.meal-log-panel input,
+.wellness-log-panel input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -591,7 +716,8 @@ textarea {
   .app-shell,
   .result-grid,
   .context-grid,
-  .meal-log-panel {
+  .meal-log-panel,
+  .wellness-log-panel {
     grid-template-columns: 1fr;
   }
 

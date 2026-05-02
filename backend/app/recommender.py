@@ -13,7 +13,13 @@ from .geo import haversine_km
 from .models import NearbyPlace, RecommendationItem, RecommendationResponse, RouteResponse, ScoreBreakdown, WeatherResponse
 from .product_providers import get_product_provider
 from .providers import get_place_provider
-from .storage import feedback_summary, recent_meal_tags as load_recent_meal_tags, save_recommendation_event
+from .storage import (
+    feedback_summary,
+    recent_meal_tags as load_recent_meal_tags,
+    recent_wellness_tags as load_recent_wellness_tags,
+    save_recommendation_event,
+    user_preferences,
+)
 
 
 SCENARIO_KEYWORDS = {
@@ -29,6 +35,11 @@ HEALTH_RULES = {
     "蔬菜少": {"prefer": ["蔬菜", "沙拉", "菌菇"], "avoid": []},
     "蛋白不足": {"prefer": ["高蛋白", "鸡肉", "鱼肉", "豆制品"], "avoid": []},
     "碳水偏高": {"prefer": ["高蛋白", "低碳水", "粗粮"], "avoid": ["甜品"]},
+    "睡眠不足": {"prefer": ["清淡", "温热", "易消化"], "avoid": ["咖啡因", "重油"]},
+    "熬夜": {"prefer": ["清淡", "温热", "高蛋白"], "avoid": ["辛辣", "油炸"]},
+    "运动不足": {"prefer": ["高蛋白", "蔬菜", "低糖"], "avoid": ["甜品", "高糖"]},
+    "久坐": {"prefer": ["蔬菜", "粗粮", "低油"], "avoid": ["重油"]},
+    "压力高": {"prefer": ["清淡", "温热", "规律饮食"], "avoid": ["咖啡因", "重辣"]},
 }
 
 
@@ -58,26 +69,39 @@ def recommend(
     allergies: list[str] | None = None,
     health_goals: list[str] | None = None,
     recent_meal_tags: list[str] | None = None,
+    recent_wellness_tags: list[str] | None = None,
     travel_style: list[str] | None = None,
     exclude_item_ids: list[str] | None = None,
     exclude_item_names: list[str] | None = None,
     request_payload: dict[str, Any] | None = None,
 ) -> RecommendationResponse:
     dataset = load_dataset()
+    preferences = user_preferences(user_id)
+    merged_location = location or preferences.get("default_location")
+    merged_budget = budget if budget is not None else preferences.get("default_budget")
+    merged_taste = taste or preferences.get("taste", [])
+    merged_avoid = avoid or preferences.get("avoid", [])
+    merged_allergies = allergies or preferences.get("allergies", [])
+    merged_health_goals = health_goals or preferences.get("health_goals", [])
+    merged_travel_style = travel_style or preferences.get("travel_style", [])
     supplied_recent_meal_tags = recent_meal_tags or []
     stored_recent_meal_tags = [] if supplied_recent_meal_tags else load_recent_meal_tags(user_id)
     effective_recent_meal_tags = supplied_recent_meal_tags or stored_recent_meal_tags
+    supplied_recent_wellness_tags = recent_wellness_tags or []
+    stored_recent_wellness_tags = [] if supplied_recent_wellness_tags else load_recent_wellness_tags(user_id)
+    effective_recent_wellness_tags = supplied_recent_wellness_tags or stored_recent_wellness_tags
     user = _build_user_profile(
         _find_user(dataset["users"], user_id),
-        budget=budget,
-        taste=taste or [],
-        avoid=avoid or [],
-        allergies=allergies or [],
-        health_goals=health_goals or [],
+        budget=merged_budget,
+        taste=merged_taste,
+        avoid=merged_avoid,
+        allergies=merged_allergies,
+        health_goals=merged_health_goals,
         recent_meal_tags=effective_recent_meal_tags,
-        travel_style=travel_style or [],
+        recent_wellness_tags=effective_recent_wellness_tags,
+        travel_style=merged_travel_style,
     )
-    intent = parse_intent(message, scenario, location, budget, user, latitude, longitude, radius_km)
+    intent = parse_intent(message, scenario, merged_location, merged_budget, user, latitude, longitude, radius_km)
     health_tags = analyze_health_state(user)
     weather_context = _load_weather_context(intent)
     feedback_profile = feedback_summary(user_id)
@@ -101,6 +125,10 @@ def recommend(
     context = _context_summary(intent, weather_context)
     context["recent_meal_tags_source"] = "request" if supplied_recent_meal_tags else "runtime-storage"
     context["recent_meal_tag_count"] = len(effective_recent_meal_tags)
+    context["recent_wellness_tags_source"] = "request" if supplied_recent_wellness_tags else "runtime-storage"
+    context["recent_wellness_tag_count"] = len(effective_recent_wellness_tags)
+    context["preferences_source"] = "runtime-storage" if preferences.get("updated_at") else "request-or-default"
+    context["stored_preference_count"] = _stored_preference_count(preferences)
     response = RecommendationResponse(
         request_id=request_id,
         scenario=intent.scenario,
@@ -133,6 +161,7 @@ def recommend(
             allergies=allergies or [],
             health_goals=health_goals or [],
             recent_meal_tags=effective_recent_meal_tags,
+            recent_wellness_tags=effective_recent_wellness_tags,
             travel_style=travel_style or [],
             exclude_item_ids=exclude_item_ids or [],
             exclude_item_names=exclude_item_names or [],
@@ -195,17 +224,18 @@ def parse_intent(
 
 
 def analyze_health_state(user: dict[str, Any]) -> list[str]:
-    if settings.strict_real_data and not user.get("recent_meals"):
+    if settings.strict_real_data and not user.get("recent_meals") and not user.get("recent_wellness_tags"):
         return []
 
     tags: list[str] = []
     for meal in user.get("recent_meals", []):
         tags.extend(meal.get("tags", []))
+    tags.extend(user.get("recent_wellness_tags", []))
 
     counts = {tag: tags.count(tag) for tag in set(tags)}
     result = [tag for tag, count in counts.items() if count >= 1 and tag in HEALTH_RULES]
 
-    if "蔬菜" not in tags and "蔬菜少" not in result:
+    if user.get("recent_meals") and "蔬菜" not in tags and "蔬菜少" not in result:
         result.append("蔬菜少")
 
     return result[:4]
@@ -445,7 +475,7 @@ def _preferred_health_tags(health_tags: list[str]) -> list[str]:
     preferred: list[str] = []
     for tag in health_tags:
         preferred.extend(HEALTH_RULES.get(tag, {}).get("prefer", []))
-    return preferred
+    return _dedupe(preferred)
 
 
 def _tag_overlap_score(tags: set[str] | list[str], preferred: list[str]) -> float:
@@ -736,6 +766,17 @@ def _request_payload(**kwargs: Any) -> dict[str, Any]:
     return kwargs
 
 
+def _stored_preference_count(preferences: dict[str, Any]) -> int:
+    count = 0
+    if preferences.get("default_location"):
+        count += 1
+    if preferences.get("default_budget"):
+        count += 1
+    for key in ["taste", "avoid", "allergies", "health_goals", "travel_style"]:
+        count += len(preferences.get(key) or [])
+    return count
+
+
 def _build_user_profile(
     base_user: dict[str, Any],
     budget: float | None,
@@ -744,6 +785,7 @@ def _build_user_profile(
     allergies: list[str],
     health_goals: list[str],
     recent_meal_tags: list[str],
+    recent_wellness_tags: list[str],
     travel_style: list[str],
 ) -> dict[str, Any]:
     if settings.strict_real_data:
@@ -757,6 +799,7 @@ def _build_user_profile(
             "health_goals": health_goals,
             "travel_style": travel_style,
             "recent_meals": [{"tags": recent_meal_tags}] if recent_meal_tags else [],
+            "recent_wellness_tags": recent_wellness_tags,
         }
         return user
 
@@ -775,6 +818,8 @@ def _build_user_profile(
         user["default_budget"] = budget
     if recent_meal_tags:
         user["recent_meals"] = [{"tags": recent_meal_tags}]
+    if recent_wellness_tags:
+        user["recent_wellness_tags"] = recent_wellness_tags
     return user
 
 
@@ -813,6 +858,16 @@ def _extract_location(message: str) -> str | None:
 
 def _tokenize(message: str) -> list[str]:
     return [word for word in re.split(r"[\s,，。！？]+", message) if word]
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
 
 
 def _clamp(value: float) -> float:

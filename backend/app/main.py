@@ -1,13 +1,16 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from .aigc import build_life_brief
+from .aigc import build_daily_brief, build_life_brief
+from .config import settings
 from .data_loader import load_dataset
 from .models import (
     AigcBriefRequest,
     AigcBriefResponse,
+    DailyBriefResponse,
     FeedbackRequest,
     FeedbackResponse,
     FeedbackSummaryResponse,
@@ -19,11 +22,13 @@ from .models import (
     PlaceSearchRequest,
     PlanItemRequest,
     PlanItemResponse,
+    PlanExportResponse,
     PlanListResponse,
     PlanStatusUpdateRequest,
     ProductSearchRequest,
     ProductSearchResponse,
     RefreshRecommendationRequest,
+    RecommendationHistoryResponse,
     RecommendationRequest,
     RecommendationResponse,
     ReverseGeocodeResponse,
@@ -47,12 +52,13 @@ from .storage import (
     meal_history,
     plan_items,
     recent_meal_tags,
+    recommendation_history,
     save_feedback_event,
     save_meal_event,
     save_plan_item,
     save_user_preferences,
     storage_status,
-    update_plan_item_status,
+    update_plan_item,
     user_preferences,
     recent_wellness_tags,
     save_wellness_event,
@@ -74,7 +80,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -276,12 +282,14 @@ def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextRespo
     tags = recent_meal_tags(user_id=user_id, limit=safe_limit)
     wellness = wellness_history(user_id=user_id, limit=safe_limit)
     wellness_tags = recent_wellness_tags(user_id=user_id, limit=safe_limit)
+    recommendations = recommendation_history(user_id=user_id, limit=5)
     preferences = UserPreferencesResponse(**user_preferences(user_id=user_id))
     plans = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="active", limit=10)]
     return UserContextResponse(
         user_id=user_id,
         recent_meal_tags=tags,
         recent_wellness_tags=wellness_tags,
+        recent_recommendations=recommendations,
         meals=meals,
         wellness=wellness,
         feedback=feedback,
@@ -296,6 +304,55 @@ def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextRespo
             "provider_cache": "runtime.sqlite.api_cache",
             "preferences": "runtime.sqlite.user_preferences",
             "plans": "runtime.sqlite.plan_items",
+        },
+    )
+
+
+@app.get("/api/user/recommendations", response_model=RecommendationHistoryResponse)
+def get_recommendation_history(user_id: str = "u001", limit: int = 20) -> RecommendationHistoryResponse:
+    safe_limit = max(1, min(limit, 100))
+    return RecommendationHistoryResponse(
+        user_id=user_id,
+        recommendations=recommendation_history(user_id=user_id, limit=safe_limit),
+    )
+
+
+@app.get("/api/user/daily-brief", response_model=DailyBriefResponse)
+def get_daily_brief(user_id: str = "u001", limit: int = 20) -> DailyBriefResponse:
+    safe_limit = max(1, min(limit, 100))
+    meals = meal_history(user_id=user_id, limit=safe_limit)
+    wellness = wellness_history(user_id=user_id, limit=safe_limit)
+    plans = [PlanItemResponse(**item).model_dump() for item in plan_items(user_id=user_id, status="active", limit=10)]
+    recommendations = recommendation_history(user_id=user_id, limit=5)
+    context = {
+        "user_id": user_id,
+        "recent_meal_tags": recent_meal_tags(user_id=user_id, limit=safe_limit),
+        "recent_wellness_tags": recent_wellness_tags(user_id=user_id, limit=safe_limit),
+        "meals": meals,
+        "wellness": wellness,
+        "preferences": UserPreferencesResponse(**user_preferences(user_id=user_id)).model_dump(),
+        "feedback": FeedbackSummaryResponse(**feedback_summary(user_id=user_id)).model_dump(),
+        "plans": plans,
+        "recent_recommendations": recommendations,
+        "storage": storage_status(),
+    }
+    brief = build_daily_brief(context)
+    return DailyBriefResponse(
+        user_id=user_id,
+        provider=str(brief["provider"]),
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        summary=str(brief["summary"]),
+        priorities=[str(item) for item in brief.get("priorities", [])],
+        risk_flags=[str(item) for item in brief.get("risk_flags", [])],
+        next_actions=[str(item) for item in brief.get("next_actions", [])],
+        context_sources={
+            "meals": "runtime.sqlite.meal_events",
+            "wellness": "runtime.sqlite.wellness_events",
+            "preferences": "runtime.sqlite.user_preferences",
+            "feedback": "runtime.sqlite.feedback_events",
+            "plans": "runtime.sqlite.plan_items",
+            "recommendations": "runtime.sqlite.recommendation_events",
+            "aigc": "llm" if provider_capabilities()["aigc"]["active"] else "context-generator",
         },
     )
 
@@ -345,9 +402,44 @@ def get_plan_items(user_id: str = "u001", status: str | None = "active", limit: 
     return PlanListResponse(user_id=user_id, plans=items)
 
 
+@app.get("/api/user/plans/export", response_model=PlanExportResponse)
+def export_plan_items(user_id: str = "u001", limit: int = 200) -> PlanExportResponse:
+    safe_limit = max(1, min(limit, 500))
+    active = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="active", limit=safe_limit)]
+    done = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="done", limit=safe_limit)]
+    canceled = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="canceled", limit=safe_limit)]
+    return PlanExportResponse(
+        user_id=user_id,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        summary={
+            "active": len(active),
+            "done": len(done),
+            "canceled": len(canceled),
+            "total": len(active) + len(done) + len(canceled),
+        },
+        active=active,
+        done=done,
+        canceled=canceled,
+    )
+
+
+@app.get("/api/user/plans/export.ics")
+def export_plan_items_ics(user_id: str = "u001", status: str = "active", limit: int = 200) -> Response:
+    safe_limit = max(1, min(limit, 500))
+    normalized_status = status if status in {"active", "done", "canceled"} else "active"
+    items = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status=normalized_status, limit=safe_limit)]
+    ics = _build_plan_ics(user_id=user_id, plans=items)
+    return Response(
+        content=ics,
+        media_type="text/calendar; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="liferec-plans-{user_id}.ics"'},
+    )
+
+
 @app.patch("/api/user/plans/{plan_id}", response_model=PlanItemResponse)
 def update_plan_status(plan_id: int, request: PlanStatusUpdateRequest) -> PlanItemResponse:
-    updated = update_plan_item_status(plan_id=plan_id, user_id=request.user_id, status=request.status)
+    updates = request.model_dump(exclude={"user_id"}, exclude_unset=True)
+    updated = update_plan_item(plan_id=plan_id, user_id=request.user_id, updates=updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Plan item not found")
     return PlanItemResponse(**updated)
@@ -434,4 +526,66 @@ def refresh_recommendation(request: RefreshRecommendationRequest) -> Recommendat
         exclude_item_ids=refreshed_payload["exclude_item_ids"],
         exclude_item_names=refreshed_payload["exclude_item_names"],
         request_payload=refreshed_payload,
+    )
+
+
+def _build_plan_ics(user_id: str, plans: list[PlanItemResponse]) -> str:
+    now = datetime.now(timezone.utc)
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//LifeRec//AI Life Recommendation//CN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:{_ics_escape(f'LifeRec Plans {user_id}')}",
+    ]
+    for index, plan in enumerate(plans, start=1):
+        start = _parse_ics_datetime(plan.scheduled_for) or now + timedelta(hours=index)
+        end = start + timedelta(hours=1)
+        description_parts = [
+            plan.note or "",
+            f"Type: {plan.item_type}",
+            f"Source: {plan.source or 'unknown'}",
+            f"Tags: {', '.join(plan.tags)}" if plan.tags else "",
+        ]
+        description = "\\n".join(part for part in description_parts if part)
+        lines.extend(
+            [
+                "BEGIN:VEVENT",
+                f"UID:liferec-plan-{plan.id}-{user_id}@liferec",
+                f"DTSTAMP:{_format_ics_datetime(now)}",
+                f"DTSTART:{_format_ics_datetime(start)}",
+                f"DTEND:{_format_ics_datetime(end)}",
+                f"SUMMARY:{_ics_escape(plan.title or plan.item_name)}",
+                f"DESCRIPTION:{_ics_escape(description)}",
+                "END:VEVENT",
+            ]
+        )
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"
+
+
+def _parse_ics_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_ics_datetime(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _ics_escape(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace("\n", "\\n")
+        .replace("\r", "")
+        .replace(",", "\\,")
+        .replace(";", "\\;")
     )

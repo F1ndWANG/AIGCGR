@@ -63,6 +63,30 @@ class RecommendationResponse(BaseModel):
     safety_note: str
 
 
+class RecommendationHistoryTopItem(BaseModel):
+    id: str
+    name: str
+    type: str
+    score: float | None = None
+    tags: list[str] = []
+    source: str | None = None
+
+
+class RecommendationHistoryItem(BaseModel):
+    request_id: str
+    scenario: str
+    message: str
+    created_at: str
+    context: dict[str, str | float | int | bool | None] = {}
+    item_count: int
+    top_items: list[RecommendationHistoryTopItem]
+
+
+class RecommendationHistoryResponse(BaseModel):
+    user_id: str
+    recommendations: list[RecommendationHistoryItem]
+
+
 class NearbyRequest(BaseModel):
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)
@@ -142,6 +166,17 @@ class AigcBriefResponse(BaseModel):
     provider: str
     summary: str
     prompt_slot: str
+
+
+class DailyBriefResponse(BaseModel):
+    user_id: str
+    provider: str
+    generated_at: str
+    summary: str
+    priorities: list[str]
+    risk_flags: list[str]
+    next_actions: list[str]
+    context_sources: dict[str, str]
 
 
 class ProductSearchRequest(BaseModel):
@@ -306,15 +341,28 @@ class PlanListResponse(BaseModel):
     plans: list[PlanItemResponse]
 
 
+class PlanExportResponse(BaseModel):
+    user_id: str
+    generated_at: str
+    summary: dict[str, int]
+    active: list[PlanItemResponse]
+    done: list[PlanItemResponse]
+    canceled: list[PlanItemResponse]
+
+
 class PlanStatusUpdateRequest(BaseModel):
     user_id: str = "u001"
-    status: PlanStatus
+    status: PlanStatus | None = None
+    title: str | None = None
+    note: str | None = None
+    scheduled_for: str | None = None
 
 
 class UserContextResponse(BaseModel):
     user_id: str
     recent_meal_tags: list[str]
     recent_wellness_tags: list[str]
+    recent_recommendations: list[RecommendationHistoryItem]
     meals: list[MealEvent]
     wellness: list[WellnessEvent]
     feedback: FeedbackSummaryResponse

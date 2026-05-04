@@ -15,7 +15,8 @@ LifeRec 是一个开源的 AI 生活推荐系统原型，目标是把“我今�
 - Wellness 信号：睡眠不足、运动不足、压力高等生活状态会进入推荐健康约束。
 - 反馈学习：喜欢、不喜欢、加入计划等行为会影响后续排序。
 - 长期画像：默认地点、预算、口味、忌口、过敏、健康目标和旅行偏好会自动补全推荐上下文。
-- 计划落地：推荐卡片可加入 active 计划列表，并支持完成或取消计划项。
+- 计划落地：推荐卡片可加入 active 计划列表，并支持设置执行时间、完成或取消计划项。
+- 计划导出：可将计划导出为 JSON 或 iCalendar `.ics`，ICS 会优先使用用户设置的执行时间。
 - 轻量多用户：前端可切换用户 ID，不同用户的饮食、偏好、反馈和计划分开保存。
 - 换一批推荐：基于 `request_id` 排除上一批结果，重新生成替代方案。
 - 真实数据边界：严格模式下不使用本地样例补餐厅、景点或商品结果。
@@ -45,8 +46,11 @@ LifeRec 是一个开源的 AI 生活推荐系统原型，目标是把“我今�
 | 天气路线 | 推荐结果加入天气、步行距离和耗时 | 高德天气 + 高德路线 |
 | 用户反馈 | 保存喜欢、不喜欢、加入计划并影响重排 | SQLite |
 | 用户上下文 | 聚合饮食记录、长期偏好、反馈画像、存储状态 | `/api/user/context` |
+| 推荐历史 | 查询用户真实生成过的推荐请求、上下文和 Top 候选 | `/api/user/recommendations` |
+| 今日简报 | 基于饮食、生活状态、计划和推荐历史生成 AIGC 生活简报 | `/api/user/daily-brief` |
 | 生活状态 | 记录睡眠、运动、压力和状态标签 | SQLite |
-| 行动计划 | 将推荐项保存为可执行计划项，并管理 active/done/canceled 状态 | SQLite |
+| 行动计划 | 将推荐项保存为可执行计划项，并管理执行时间与 active/done/canceled 状态 | SQLite |
+| 计划导出 | 导出结构化计划 JSON 或可导入日历的 ICS | `/api/user/plans/export`、`/api/user/plans/export.ics` |
 | 用户隔离 | 前端切换用户 ID，运行时数据按 `user_id` 分区 | SQLite |
 | 推荐评估 | 检查重复、预算、距离、真实数据、健康冲突 | 本地评估脚本 |
 
@@ -80,6 +84,7 @@ LLM_MODEL=deepseek-v4-flash
 PRODUCT_PROVIDER=aigc
 STRICT_REAL_DATA=true
 PROVIDER_CACHE_TTL_SECONDS=300
+CORS_ALLOW_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 ```
 
 `.env` 已被 `.gitignore` 忽略，不会提交到 GitHub。
@@ -112,6 +117,20 @@ http://127.0.0.1:8000/docs
 
 ```text
 http://127.0.0.1:5173
+```
+
+前端默认调用：
+
+```text
+http://localhost:8000/api
+```
+
+如果后端部署在其他机器或云端，可以在页面左侧 `API Endpoint` 中修改并保存 API Base URL，例如 `https://your-domain.com/api`，无需改源码。
+
+部署到公网域名时，还需要在后端 `.env` 中把前端域名加入 `CORS_ALLOW_ORIGINS`，例如：
+
+```env
+CORS_ALLOW_ORIGINS=https://your-frontend-domain.com
 ```
 
 ### 4. Docker 启动
@@ -149,13 +168,17 @@ AIGC 商品：
 | `POST /api/recommend` | 统一生活推荐入口 |
 | `POST /api/recommend/refresh` | 基于 `request_id` 排除上一批结果并换一批 |
 | `GET /api/user/context` | 聚合用户饮食记录、长期偏好、反馈画像和上下文来源 |
+| `GET /api/user/recommendations` | 查看用户最近真实生成过的推荐请求和 Top 候选 |
+| `GET /api/user/daily-brief` | 基于用户真实上下文生成今日 AIGC 生活简报 |
 | `GET /api/user/preferences` | 查看长期用户偏好画像 |
 | `PUT /api/user/preferences` | 保存默认地点、预算、口味、忌口、过敏、健康目标和旅行偏好 |
 | `POST /api/user/wellness` | 保存睡眠、运动、压力和生活状态标签 |
 | `GET /api/user/wellness` | 查看近期生活状态记录和标签 |
 | `POST /api/user/plans` | 将推荐项加入用户计划列表 |
 | `GET /api/user/plans` | 查看用户计划列表 |
-| `PATCH /api/user/plans/{plan_id}` | 更新计划状态：active、done、canceled |
+| `GET /api/user/plans/export` | 导出用户计划 JSON |
+| `GET /api/user/plans/export.ics` | 导出用户计划 iCalendar 文件 |
+| `PATCH /api/user/plans/{plan_id}` | 更新计划状态、标题、备注或 `scheduled_for` 执行时间 |
 | `POST /api/user/meals` | 保存用户真实饮食记录 |
 | `GET /api/user/meals` | 查看用户近期饮食记录和标签 |
 | `POST /api/feedback` | 保存用户对推荐项的真实反馈 |
@@ -179,6 +202,7 @@ LifeRec 明确区分真实外部数据、用户运行时数据、AIGC 生成内�
 | 饮食记录 | 用户主动输入 | 写入 SQLite，只用于健康约束和排序 |
 | 生活状态 | 用户主动输入 | 写入 SQLite，用于一般生活推荐约束，不做医疗诊断 |
 | 长期偏好 | 用户主动设置 | 写入 SQLite，用于补全后续推荐上下文 |
+| 推荐历史 | 每次生成推荐 | 写入 SQLite，用于历史复盘、换一批和后续 Agent 接力 |
 | 计划列表 | 用户点击加入计划 | 写入 SQLite，用于保存待执行推荐项 |
 | 用户反馈 | 用户点击行为 | 写入 SQLite，只影响后续排序 |
 | 本地 JSON | `data/` | 仅开发 fallback，严格模式不补推荐结果 |

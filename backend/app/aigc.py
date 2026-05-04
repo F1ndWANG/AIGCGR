@@ -37,6 +37,25 @@ def build_life_brief(message: str, scenario: str, health_tags: list[str]) -> tup
     )
 
 
+def build_daily_brief(context: dict[str, object]) -> dict[str, object]:
+    """Generate a daily brief from real runtime user context."""
+    if settings.llm_api_key:
+        generated = _call_daily_brief_llm(context)
+        if generated:
+            return {"provider": "llm", **generated}
+
+    if settings.strict_real_data:
+        return {
+            "provider": "unavailable",
+            "summary": "AIGC Provider is not configured or failed. Strict real-data mode will not use a local template for the daily brief.",
+            "priorities": [],
+            "risk_flags": ["aigc-unavailable"],
+            "next_actions": ["Configure LLM_API_KEY and generate the daily brief again."],
+        }
+
+    return {"provider": "context-generator", **_fallback_daily_brief(context)}
+
+
 def _call_openai_compatible_llm(message: str, scenario: str, health_tags: list[str]) -> str:
     base_url = (settings.llm_base_url or "https://api.deepseek.com").rstrip("/")
     endpoint = f"{base_url}/chat/completions"
@@ -94,6 +113,129 @@ def _fallback_brief(message: str, scenario: str, health_tags: list[str]) -> str:
     if scenario == "shopping":
         return "AIGC 生成策略：把生活目标转成商品清单，并解释每个商品的使用场景。"
     return f"AIGC 生成策略：结合“{message}”和健康标签“{health}”，生成饮食方向、餐厅选择和菜品理由。"
+
+
+def _call_daily_brief_llm(context: dict[str, object]) -> dict[str, object] | None:
+    base_url = (settings.llm_base_url or "https://api.deepseek.com").rstrip("/")
+    endpoint = f"{base_url}/chat/completions"
+    payload = {
+        "model": settings.llm_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are LifeRec's AIGC daily life brief generator. "
+                    "Only use the provided real user context. Do not invent restaurants, products, places, prices, or medical diagnoses. "
+                    "Return a JSON object with summary, priorities, risk_flags, next_actions. "
+                    "Each array should contain 2 to 5 short Chinese strings."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(context, ensure_ascii=False),
+            },
+        ],
+        "temperature": 0.25,
+        "max_tokens": 700,
+    }
+
+    try:
+        with httpx.Client(timeout=25) as client:
+            response = client.post(
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {settings.llm_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            content = _message_text(response.json()["choices"][0]["message"])
+            return _parse_daily_brief_json(content)
+    except Exception:
+        return None
+
+
+def _parse_daily_brief_json(content: str) -> dict[str, object] | None:
+    text = content.strip()
+    match = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    if match:
+        text = match.group(1).strip()
+    data = _loads_json_object(text) or _loads_embedded_json_object(text)
+    if not isinstance(data, dict):
+        return None
+    summary = str(data.get("summary") or "").strip()
+    if not summary:
+        return None
+    return {
+        "summary": summary,
+        "priorities": _string_list(data.get("priorities")),
+        "risk_flags": _string_list(data.get("risk_flags")),
+        "next_actions": _string_list(data.get("next_actions")),
+    }
+
+
+def _fallback_daily_brief(context: dict[str, object]) -> dict[str, object]:
+    meals = _object_list(context.get("meals"))
+    wellness = _object_list(context.get("wellness"))
+    plans = _object_list(context.get("plans"))
+    recommendations = _object_list(context.get("recent_recommendations"))
+    preferences = context.get("preferences") if isinstance(context.get("preferences"), dict) else {}
+    meal_tags = _string_list(context.get("recent_meal_tags"))
+    wellness_tags = _string_list(context.get("recent_wellness_tags"))
+
+    priorities: list[str] = []
+    risk_flags: list[str] = []
+    next_actions: list[str] = []
+
+    if meal_tags:
+        priorities.append(f"Use recent meal tags first: {', '.join(meal_tags[:4])}.")
+    else:
+        next_actions.append("Record one real meal so later recommendations can use recent diet context.")
+
+    if wellness_tags:
+        priorities.append(f"Apply wellness constraints: {', '.join(wellness_tags[:4])}.")
+    else:
+        next_actions.append("Add sleep, exercise, or stress signals to improve life-context quality.")
+
+    if preferences:
+        preference_parts = []
+        if preferences.get("default_location"):
+            preference_parts.append(f"default location {preferences['default_location']}")
+        if preferences.get("default_budget"):
+            preference_parts.append(f"budget {preferences['default_budget']}")
+        health_goals = _string_list(preferences.get("health_goals"))
+        if health_goals:
+            preference_parts.append(f"health goals {', '.join(health_goals[:3])}")
+        if preference_parts:
+            priorities.append("Long-term profile: " + "; ".join(preference_parts) + ".")
+
+    if plans:
+        next_actions.append(f"Handle {len(plans)} active plan item(s); set a schedule for the nearest one first.")
+    else:
+        next_actions.append("Add one candidate from the next recommendation result into plans.")
+
+    if recommendations:
+        next_actions.append("Load a recent recommendation request and use refresh to explore alternatives.")
+
+    warning_tags = {"high-oil", "high-salt", "low-vegetable", "sleep-low", "stress-high", "exercise-low", "高油", "高盐", "蔬菜少", "睡眠不足", "压力高", "运动不足"}
+    if any(tag in warning_tags for tag in meal_tags + wellness_tags):
+        risk_flags.append("Recent lifestyle signals require low-burden and low-execution-cost recommendations.")
+    if not meals and not wellness:
+        risk_flags.append("User context is thin; recommendation reliability depends heavily on this request.")
+    if not recommendations:
+        risk_flags.append("No recommendation history is available for review yet.")
+
+    summary = "Daily brief generated from real user context."
+    if priorities:
+        summary += f" Main priority: {priorities[0].rstrip('.') }."
+
+    return {
+        "summary": summary,
+        "priorities": priorities[:5],
+        "risk_flags": risk_flags[:5],
+        "next_actions": next_actions[:5],
+    }
 
 
 def generate_product_ideas(keyword: str, scenario: str, budget: float | None, tags: list[str], limit: int) -> list[dict[str, object]]:
@@ -188,6 +330,38 @@ def _loads_json_array(text: str) -> object | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, list) else None
+
+
+def _loads_json_object(text: str) -> object | None:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _loads_embedded_json_object(text: str) -> object | None:
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
+        try:
+            data, _ = decoder.raw_decode(text[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _object_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _loads_embedded_product_array(text: str) -> object | None:

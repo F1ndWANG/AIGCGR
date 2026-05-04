@@ -1,5 +1,4 @@
-const API_BASE_URL = "http://localhost:8000/api";
-const API_URL = `${API_BASE_URL}/recommend`;
+const DEFAULT_API_BASE_URL = "http://localhost:8000/api";
 
 const state = {
   scenario: "auto",
@@ -8,9 +7,12 @@ const state = {
   requestId: null,
   preferences: null,
   userId: localStorage.getItem("liferec:userId") || "u001",
+  apiBaseUrl: normalizeApiBaseUrl(localStorage.getItem("liferec:apiBaseUrl") || DEFAULT_API_BASE_URL),
 };
 
 const scenarioButtons = document.querySelectorAll(".scenario");
+const apiBaseInput = document.querySelector("#apiBaseInput");
+const saveApiBaseBtn = document.querySelector("#saveApiBaseBtn");
 const userIdInput = document.querySelector("#userIdInput");
 const switchUserBtn = document.querySelector("#switchUserBtn");
 const input = document.querySelector("#messageInput");
@@ -47,8 +49,14 @@ const planList = document.querySelector("#planList");
 const recommendationList = document.querySelector("#recommendationList");
 const providerSummary = document.querySelector("#providerSummary");
 const memorySummary = document.querySelector("#memorySummary");
+const recommendationHistory = document.querySelector("#recommendationHistory");
+const dailyBriefPanel = document.querySelector("#dailyBriefPanel");
+const dailyBriefBtn = document.querySelector("#dailyBriefBtn");
 const planSummary = document.querySelector("#planSummary");
+const exportPlansBtn = document.querySelector("#exportPlansBtn");
+const exportPlansIcsBtn = document.querySelector("#exportPlansIcsBtn");
 
+apiBaseInput.value = state.apiBaseUrl;
 userIdInput.value = state.userId;
 loadProviderCapabilities();
 loadUserContext();
@@ -79,8 +87,30 @@ saveMealBtn.addEventListener("click", async () => {
   await saveMealLog();
 });
 
+saveApiBaseBtn.addEventListener("click", async () => {
+  await saveApiBaseUrl();
+});
+
+apiBaseInput.addEventListener("keydown", async (event) => {
+  if (event.key === "Enter") {
+    await saveApiBaseUrl();
+  }
+});
+
 saveWellnessBtn.addEventListener("click", async () => {
   await saveWellnessLog();
+});
+
+exportPlansBtn.addEventListener("click", async () => {
+  await exportPlans();
+});
+
+exportPlansIcsBtn.addEventListener("click", async () => {
+  await exportPlansIcs();
+});
+
+dailyBriefBtn.addEventListener("click", async () => {
+  await generateDailyBrief();
 });
 
 savePreferencesBtn.addEventListener("click", async () => {
@@ -132,7 +162,7 @@ async function requestRecommendation() {
   setStatus("正在生成推荐方案...", "loading");
 
   try {
-    const response = await fetch(API_URL, {
+    const response = await fetch(apiUrl("/recommend"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -161,6 +191,7 @@ async function requestRecommendation() {
 
     const data = await response.json();
     renderResult(data);
+    await loadUserContext();
     setStatus("推荐已生成。", "ready");
   } catch (error) {
     setStatus("无法连接后端，请确认 FastAPI 已在 localhost:8000 启动。", "error");
@@ -180,7 +211,7 @@ async function refreshRecommendation() {
   setStatus("正在排除上一批结果并重新生成...", "loading");
 
   try {
-    const response = await fetch(`${API_BASE_URL}/recommend/refresh`, {
+    const response = await fetch(apiUrl("/recommend/refresh"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -197,6 +228,7 @@ async function refreshRecommendation() {
 
     const data = await response.json();
     renderResult(data);
+    await loadUserContext();
     setStatus("已生成替代推荐。", "ready");
   } catch (error) {
     setStatus("换一批失败，可能是当前候选不足或后端未启动。", "error");
@@ -222,7 +254,7 @@ async function saveMealLog() {
   setStatus("正在保存饮食记录...", "loading");
 
   try {
-    const response = await fetch(`${API_BASE_URL}/user/meals`, {
+    const response = await fetch(apiUrl("/user/meals"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -266,7 +298,7 @@ async function saveWellnessLog() {
   setStatus("正在保存生活状态...", "loading");
 
   try {
-    const response = await fetch(`${API_BASE_URL}/user/wellness`, {
+    const response = await fetch(apiUrl("/user/wellness"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -303,7 +335,7 @@ async function savePreferences() {
   setStatus("正在保存长期偏好...", "loading");
 
   try {
-    const response = await fetch(`${API_BASE_URL}/user/preferences`, {
+    const response = await fetch(apiUrl("/user/preferences"), {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -350,8 +382,29 @@ async function switchUser() {
   setStatus(`当前用户：${nextUserId}`, "ready");
 }
 
+async function saveApiBaseUrl() {
+  const nextApiBaseUrl = normalizeApiBaseUrl(apiBaseInput.value || DEFAULT_API_BASE_URL);
+  state.apiBaseUrl = nextApiBaseUrl;
+  apiBaseInput.value = nextApiBaseUrl;
+  localStorage.setItem("liferec:apiBaseUrl", nextApiBaseUrl);
+  state.requestId = null;
+  refreshBtn.disabled = true;
+  setStatus(`API 地址已切换为 ${nextApiBaseUrl}，正在重新读取 Provider 状态...`, "loading");
+  await loadProviderCapabilities();
+  await loadUserContext();
+  setStatus("API 地址已保存。", "ready");
+}
+
 function currentUserId() {
   return state.userId || "u001";
+}
+
+function apiUrl(path) {
+  return `${state.apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function normalizeApiBaseUrl(value) {
+  return String(value || DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
 }
 
 function clearUserScopedInputs() {
@@ -369,11 +422,13 @@ function clearUserScopedInputs() {
   stressLevelInput.value = "";
   planSummary.innerHTML = "<span>正在读取计划...</span>";
   memorySummary.innerHTML = "<span>正在读取用户上下文...</span>";
+  recommendationHistory.innerHTML = "<span>正在读取推荐历史...</span>";
+  dailyBriefPanel.innerHTML = "<span>点击生成，系统会读取当前用户的真实记录。</span>";
 }
 
 async function loadMealHistory() {
   try {
-    const response = await fetch(`${API_BASE_URL}/user/meals?user_id=${encodeURIComponent(currentUserId())}&limit=20`);
+    const response = await fetch(apiUrl(`/user/meals?user_id=${encodeURIComponent(currentUserId())}&limit=20`));
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
@@ -388,7 +443,7 @@ async function loadMealHistory() {
 
 async function loadUserContext() {
   try {
-    const response = await fetch(`${API_BASE_URL}/user/context?user_id=${encodeURIComponent(currentUserId())}&limit=20`);
+    const response = await fetch(apiUrl(`/user/context?user_id=${encodeURIComponent(currentUserId())}&limit=20`));
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
@@ -403,6 +458,7 @@ async function loadUserContext() {
     }
   } catch (error) {
     memorySummary.innerHTML = "<span>用户上下文暂不可用</span>";
+    recommendationHistory.innerHTML = "<span>推荐历史暂不可用</span>";
     console.debug("User context unavailable", error);
     await loadMealHistory();
   }
@@ -432,7 +488,87 @@ function renderUserContext(data) {
     <div class="profile-tags">${mealTags}</div>
     <div class="profile-tags wellness-tags">${wellnessTags}</div>
   `;
+  renderRecommendationHistory(data.recent_recommendations || []);
   renderPlanSummary(data.plans || []);
+}
+
+function renderRecommendationHistory(history) {
+  if (!history.length) {
+    recommendationHistory.innerHTML = "<span>暂无推荐历史</span>";
+    return;
+  }
+
+  recommendationHistory.innerHTML = "";
+  history.slice(0, 5).forEach((event) => {
+    const itemNames = event.top_items?.length
+      ? event.top_items.map((item) => escapeHtml(item.name)).join(" / ")
+      : "未返回候选项";
+    const card = document.createElement("article");
+    card.className = "history-chip";
+    card.innerHTML = `
+      <div>
+        <strong>${escapeHtml(formatScenarioLabel(event.scenario))}</strong>
+        <small>${escapeHtml(formatPlanDateTime(event.created_at))} · ${event.item_count || 0} 个候选</small>
+      </div>
+      <p>${escapeHtml(trimText(event.message, 42))}</p>
+      <small>Top：${itemNames}</small>
+    `;
+    card.addEventListener("click", () => {
+      input.value = event.message;
+      state.requestId = event.request_id;
+      refreshBtn.disabled = false;
+      setStatus(`已载入历史请求 ${event.request_id}，可直接换一批。`, "ready");
+    });
+    recommendationHistory.appendChild(card);
+  });
+}
+
+async function generateDailyBrief() {
+  dailyBriefBtn.disabled = true;
+  dailyBriefPanel.innerHTML = "<span>正在生成今日简报...</span>";
+  setStatus("正在基于真实用户上下文生成今日简报...", "loading");
+  try {
+    const response = await fetch(apiUrl(`/user/daily-brief?user_id=${encodeURIComponent(currentUserId())}&limit=20`));
+    if (!response.ok) {
+      throw new Error(`Daily brief API returned ${response.status}`);
+    }
+    const data = await response.json();
+    renderDailyBrief(data);
+    setStatus("今日简报已生成。", "ready");
+  } catch (error) {
+    dailyBriefPanel.innerHTML = "<span>今日简报生成失败，请确认后端已启动。</span>";
+    setStatus("今日简报生成失败。", "error");
+    console.error(error);
+  } finally {
+    dailyBriefBtn.disabled = false;
+  }
+}
+
+function renderDailyBrief(data) {
+  dailyBriefPanel.innerHTML = `
+    <article class="daily-brief-card">
+      <div>
+        <strong>${escapeHtml(data.provider || "unknown")}</strong>
+        <small>${escapeHtml(formatPlanDateTime(data.generated_at))}</small>
+      </div>
+      <p>${escapeHtml(data.summary || "暂无简报内容。")}</p>
+      ${renderBriefList("优先事项", data.priorities)}
+      ${renderBriefList("风险信号", data.risk_flags)}
+      ${renderBriefList("下一步", data.next_actions)}
+    </article>
+  `;
+}
+
+function renderBriefList(title, items) {
+  if (!items?.length) {
+    return "";
+  }
+  return `
+    <div class="brief-list">
+      <small>${escapeHtml(title)}</small>
+      <ul>${items.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </div>
+  `;
 }
 
 function fillPreferenceInputs(preferences) {
@@ -455,16 +591,31 @@ function renderPlanSummary(plans) {
   plans.slice(0, 8).forEach((plan) => {
     const chip = document.createElement("article");
     chip.className = "plan-chip";
+    const scheduledValue = toDateTimeLocalValue(plan.scheduled_for);
+    const scheduledLabel = plan.scheduled_for
+      ? formatPlanDateTime(plan.scheduled_for)
+      : "未设置时间，导出 ICS 时会自动顺延";
     chip.innerHTML = `
       <div>
         <strong>${escapeHtml(plan.title || plan.item_name)}</strong>
         <small>${escapeHtml(plan.item_type)} · ${escapeHtml(plan.source || "unknown")}</small>
+        <small>计划时间：${escapeHtml(scheduledLabel)}</small>
       </div>
+      <label class="plan-schedule">
+        <span>执行时间</span>
+        <input type="datetime-local" value="${escapeHtml(scheduledValue)}">
+      </label>
       <div class="plan-actions">
+        <button data-action="schedule">保存时间</button>
         <button data-status="done">完成</button>
         <button data-status="canceled">取消</button>
       </div>
     `;
+    const scheduleInput = chip.querySelector("input[type='datetime-local']");
+    const scheduleButton = chip.querySelector("[data-action='schedule']");
+    scheduleButton.addEventListener("click", async () => {
+      await updatePlanSchedule(plan.id, scheduleInput, scheduleButton);
+    });
     chip.querySelectorAll("[data-status]").forEach((button) => {
       button.addEventListener("click", async () => {
         await updatePlanStatus(plan.id, button.dataset.status, button);
@@ -497,7 +648,7 @@ function renderResult(data) {
 
 async function loadProviderCapabilities() {
   try {
-    const response = await fetch(`${API_BASE_URL}/providers/capabilities`);
+    const response = await fetch(apiUrl("/providers/capabilities"));
     if (!response.ok) {
       throw new Error(`API returned ${response.status}`);
     }
@@ -580,7 +731,7 @@ function createCard(item) {
 async function sendFeedback(item, action, button) {
   button.disabled = true;
   try {
-    const response = await fetch(`${API_BASE_URL}/feedback`, {
+    const response = await fetch(apiUrl("/feedback"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -613,7 +764,7 @@ async function sendFeedback(item, action, button) {
 }
 
 async function savePlanItem(item) {
-  const response = await fetch(`${API_BASE_URL}/user/plans`, {
+  const response = await fetch(apiUrl("/user/plans"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -639,7 +790,7 @@ async function savePlanItem(item) {
 async function updatePlanStatus(planId, status, button) {
   button.disabled = true;
   try {
-    const response = await fetch(`${API_BASE_URL}/user/plans/${planId}`, {
+    const response = await fetch(apiUrl(`/user/plans/${planId}`), {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -658,6 +809,91 @@ async function updatePlanStatus(planId, status, button) {
     button.disabled = false;
     setStatus("计划状态更新失败，请确认后端已启动。", "error");
     console.error(error);
+  }
+}
+
+async function updatePlanSchedule(planId, input, button) {
+  const scheduledFor = dateTimeLocalToIso(input.value);
+  if (input.value && !scheduledFor) {
+    setStatus("计划时间格式无效，请重新选择。", "error");
+    return;
+  }
+
+  button.disabled = true;
+  try {
+    const response = await fetch(apiUrl(`/user/plans/${planId}`), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: currentUserId(),
+        scheduled_for: scheduledFor,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`Plan schedule API returned ${response.status}`);
+    }
+    await loadUserContext();
+    setStatus(scheduledFor ? "计划时间已保存。" : "计划时间已清空。", "ready");
+  } catch (error) {
+    button.disabled = false;
+    setStatus("计划时间保存失败，请确认后端已启动。", "error");
+    console.error(error);
+  }
+}
+
+async function exportPlans() {
+  exportPlansBtn.disabled = true;
+  setStatus("正在导出计划...", "loading");
+  try {
+    const response = await fetch(apiUrl(`/user/plans/export?user_id=${encodeURIComponent(currentUserId())}&limit=200`));
+    if (!response.ok) {
+      throw new Error(`Plan export API returned ${response.status}`);
+    }
+    const data = await response.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `liferec-plans-${currentUserId()}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`计划已导出：${data.summary?.total || 0} 项。`, "ready");
+  } catch (error) {
+    setStatus("计划导出失败，请确认后端已启动。", "error");
+    console.error(error);
+  } finally {
+    exportPlansBtn.disabled = false;
+  }
+}
+
+async function exportPlansIcs() {
+  exportPlansIcsBtn.disabled = true;
+  setStatus("正在导出日历文件...", "loading");
+  try {
+    const response = await fetch(apiUrl(`/user/plans/export.ics?user_id=${encodeURIComponent(currentUserId())}&status=active&limit=200`));
+    if (!response.ok) {
+      throw new Error(`Plan ICS export API returned ${response.status}`);
+    }
+    const text = await response.text();
+    const blob = new Blob([text], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `liferec-plans-${currentUserId()}-${new Date().toISOString().slice(0, 10)}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setStatus("日历文件已导出。", "ready");
+  } catch (error) {
+    setStatus("日历导出失败，请确认后端已启动。", "error");
+    console.error(error);
+  } finally {
+    exportPlansIcsBtn.disabled = false;
   }
 }
 
@@ -729,6 +965,61 @@ function countPreferences(preferences) {
     count += preferences[key]?.length || 0;
   });
   return count;
+}
+
+function formatScenarioLabel(value) {
+  const map = {
+    auto: "自动识别",
+    diet: "饮食健康",
+    restaurant: "饮食餐厅",
+    shopping: "生活购物",
+    travel: "旅行规划",
+  };
+  return map[value] || value || "未知场景";
+}
+
+function trimText(value, maxLength) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function formatPlanDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function toDateTimeLocalValue(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value).slice(0, 16);
+  }
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function dateTimeLocalToIso(value) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.toISOString();
 }
 
 function escapeHtml(value) {

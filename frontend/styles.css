@@ -124,10 +124,12 @@ button {
   margin-top: 18px;
 }
 
+.api-switcher,
 .user-switcher {
   margin-top: 18px;
 }
 
+.api-switcher label,
 .user-switcher label {
   display: grid;
   gap: 6px;
@@ -135,6 +137,7 @@ button {
   font-size: 12px;
 }
 
+.api-switcher input,
 .user-switcher input {
   width: 100%;
   border: 1px solid var(--line);
@@ -144,11 +147,13 @@ button {
   color: var(--ink);
 }
 
+.api-switcher button,
 .user-switcher button {
   width: 100%;
   margin-top: 10px;
 }
 
+.api-switcher small,
 .user-switcher small {
   display: block;
   margin-top: 10px;
@@ -233,13 +238,41 @@ button {
   font-size: 12px;
 }
 
+.plan-schedule {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.plan-schedule input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--ink);
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.plan-schedule input:focus {
+  border-color: var(--primary);
+  outline: 2px solid rgba(12, 124, 103, 0.14);
+}
+
 .plan-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
   gap: 6px;
 }
 
 .plan-actions button {
-  flex: 1;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
@@ -251,6 +284,17 @@ button {
 .plan-actions button:hover {
   border-color: var(--primary);
   color: var(--primary-dark);
+}
+
+.plan-export-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.plan-export-row button {
+  width: 100%;
 }
 
 .memory-stats {
@@ -288,6 +332,106 @@ button {
   font-size: 12px;
 }
 
+.history-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.history-chip {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.66);
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.history-chip:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.history-chip strong,
+.history-chip small {
+  display: block;
+}
+
+.history-chip strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.history-chip small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.history-chip p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.daily-brief-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.daily-brief-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 11px;
+}
+
+.daily-brief-card strong,
+.daily-brief-card small {
+  display: block;
+}
+
+.daily-brief-card strong {
+  color: var(--primary-dark);
+  font-size: 13px;
+}
+
+.daily-brief-card small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.daily-brief-card p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.brief-list {
+  display: grid;
+  gap: 5px;
+}
+
+.brief-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.daily-brief-action {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .workspace {
   padding: 34px;
 }
@@ -301,12 +445,12 @@ button {
 }
 
 .topbar h1 {
-  max-width: 780px;
+  max-width: none;
   margin: 6px 0 0;
-  font-size: clamp(32px, 5vw, 64px);
+  font-size: clamp(34px, 3.7vw, 60px);
   line-height: 1.03;
   letter-spacing: 0;
-  text-wrap: pretty;
+  white-space: nowrap;
 }
 
 .eyebrow {
@@ -731,6 +875,10 @@ textarea {
   .status-panel {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .topbar h1 {
+    white-space: normal;
   }
 }
 

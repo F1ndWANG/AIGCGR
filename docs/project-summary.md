@@ -60,6 +60,8 @@ Recommendation Response
 - `POST /api/feedback`
 - `GET /api/feedback/summary`
 - `GET /api/user/context`
+- `GET /api/user/life-state`
+- `GET /api/user/export`
 - `GET /api/user/recommendations`
 - `GET /api/user/daily-brief`
 - `POST /api/user/meals`
@@ -74,11 +76,18 @@ Recommendation Response
 - 高德天气进入推荐上下文和行动计划。
 - 高德步行路线进入推荐卡片。
 - 健康、预算、距离、偏好、上下文综合排序。
+- 每条推荐带有 `RecommendationTrace`，记录 ranker、评分公式、数据源、证据、扣分项和置信度。
+- `ExecutionCostScorer` 会计算距离、预算、时间、天气、复杂度和数据风险，并把可执行性分数纳入最终重排。
+- `PlanAwareRanker` 会用 active/done/canceled 计划做去重、加权和降权，减少重复推荐。
+- `AIGCVerifier` 会标记 Provider 真实数据、AIGC 商品需求生成和本地样例数据，并检测 SKU、库存、折扣、购买链接等禁止声明。
+- `LifeStateEncoder` 会把饮食、生活状态、长期偏好、反馈、计划和推荐历史编码为动态 Life State Vector。
 - AIGC 策略摘要和商品需求生成。
 - `STRICT_REAL_DATA` 严格真实数据模式。
 - SQLite 运行时推荐历史、用户反馈、饮食记录和生活状态记录；推荐历史可按用户查询请求、上下文和 Top 候选。
+- 完整用户记忆导出，便于调试、备份、迁移和后续 Agent 接力。
 - SQLite 长期用户偏好画像，包括默认地点、默认预算、口味、忌口、过敏、健康目标和旅行偏好。
 - SQLite 计划列表，推荐项可从卡片直接加入计划，并支持设置执行时间、完成或取消。
+- 计划状态更新为 done/canceled 时会自动写入反馈事件，用于后续排序学习。
 - 计划 JSON 和 iCalendar 导出，便于备份、分享、导入日历和后续 Agent 接力；ICS 优先使用 `scheduled_for`。
 - 前端可切换用户 ID，饮食、偏好、反馈、推荐历史和计划按 `user_id` 隔离。
 - SQLite Provider 响应缓存，降低外部 API 重复调用。
@@ -86,8 +95,9 @@ Recommendation Response
 - 推荐请求未显式传入偏好时，会自动读取长期用户画像补全上下文。
 - 推荐请求未显式传入生活状态时，会自动读取近期 Wellness 标签补充健康约束。
 - 今日简报会聚合真实用户上下文，并通过 LLM 或上下文生成器输出优先事项、风险信号和下一步动作。
+- `/api/recommend`、`/api/user/context`、`/api/user/daily-brief` 和 `/api/user/export` 都会返回 `life_state`。
 - `request_id` 驱动的“换一批”替代推荐。
-- 推荐评估脚本可检查预算、距离、数据来源、排除项和健康冲突。
+- 推荐评估脚本可检查预算、距离、数据来源、排除项、健康冲突、低可执行性和 AIGC 禁止声明。
 
 ### 前端
 
@@ -101,13 +111,19 @@ Recommendation Response
 - 轻量用户切换，便于本地模拟不同用户画像。
 - 用户记忆摘要：饮食记录、正反馈、负反馈和近期标签。
 - 长期偏好保存表单，后续推荐会自动应用这些偏好。
+- 完整用户记忆 JSON 导出按钮。
 - Recommendation Memory 侧栏，展示最近真实生成过的推荐请求和 Top 候选，并可点击载入历史请求继续换一批。
 - AIGC Daily Brief 侧栏，按需生成基于真实用户上下文的今日生活简报。
+- Life State Vector 侧栏，展示上下文完整度、置信度、短期信号、约束和数据缺口。
 - Active Plans 侧栏，展示已加入计划的推荐项，并可设置执行时间、标记完成或取消。
 - 导出计划 JSON 文件，包含 active、done、canceled 分组和统计。
 - 导出 active 计划为 `.ics` 日历文件，可导入系统日历。
 - Provider 能力状态展示。
 - 推荐卡片、健康上下文、AIGC 摘要和行动计划展示。
+- 推荐卡片展示可执行性分数、执行成本、阻碍项和执行证据。
+- 推荐卡片展示计划感知排序信号，包括重复计划、计划冲突和 done/canceled 标签证据。
+- 推荐卡片展示真实性分数、幻觉风险、数据边界标签和禁止声明风险。
+- 推荐卡片可展开查看算法追踪和推荐证据链。
 
 ## 5. 数据文件
 
@@ -126,6 +142,10 @@ Recommendation Response
 | 文件 | 说明 |
 |---|---|
 | `backend/app/main.py` | FastAPI 路由入口 |
+| `backend/app/life_state.py` | Life State Vector 编码器 |
+| `backend/app/execution.py` | 执行成本和可执行性评分器 |
+| `backend/app/plan_ranker.py` | 计划感知排序器 |
+| `backend/app/aigc_verifier.py` | AIGC 真实性和幻觉风险校验 |
 | `backend/app/models.py` | 请求和响应模型 |
 | `backend/app/recommender.py` | 推荐核心逻辑 |
 | `backend/app/providers.py` | 高德地点、天气、路线 Provider |

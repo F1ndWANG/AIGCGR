@@ -49,6 +49,8 @@ const planList = document.querySelector("#planList");
 const recommendationList = document.querySelector("#recommendationList");
 const providerSummary = document.querySelector("#providerSummary");
 const memorySummary = document.querySelector("#memorySummary");
+const lifeStateSummary = document.querySelector("#lifeStateSummary");
+const exportMemoryBtn = document.querySelector("#exportMemoryBtn");
 const recommendationHistory = document.querySelector("#recommendationHistory");
 const dailyBriefPanel = document.querySelector("#dailyBriefPanel");
 const dailyBriefBtn = document.querySelector("#dailyBriefBtn");
@@ -107,6 +109,10 @@ exportPlansBtn.addEventListener("click", async () => {
 
 exportPlansIcsBtn.addEventListener("click", async () => {
   await exportPlansIcs();
+});
+
+exportMemoryBtn.addEventListener("click", async () => {
+  await exportUserMemory();
 });
 
 dailyBriefBtn.addEventListener("click", async () => {
@@ -422,6 +428,7 @@ function clearUserScopedInputs() {
   stressLevelInput.value = "";
   planSummary.innerHTML = "<span>正在读取计划...</span>";
   memorySummary.innerHTML = "<span>正在读取用户上下文...</span>";
+  lifeStateSummary.innerHTML = "<span>正在编码当前用户生活状态...</span>";
   recommendationHistory.innerHTML = "<span>正在读取推荐历史...</span>";
   dailyBriefPanel.innerHTML = "<span>点击生成，系统会读取当前用户的真实记录。</span>";
 }
@@ -458,6 +465,7 @@ async function loadUserContext() {
     }
   } catch (error) {
     memorySummary.innerHTML = "<span>用户上下文暂不可用</span>";
+    lifeStateSummary.innerHTML = "<span>生活状态编码暂不可用</span>";
     recommendationHistory.innerHTML = "<span>推荐历史暂不可用</span>";
     console.debug("User context unavailable", error);
     await loadMealHistory();
@@ -488,8 +496,50 @@ function renderUserContext(data) {
     <div class="profile-tags">${mealTags}</div>
     <div class="profile-tags wellness-tags">${wellnessTags}</div>
   `;
+  renderLifeState(data.life_state);
   renderRecommendationHistory(data.recent_recommendations || []);
   renderPlanSummary(data.plans || []);
+}
+
+function renderLifeState(lifeState) {
+  if (!lifeState) {
+    lifeStateSummary.innerHTML = "<span>暂无生活状态编码</span>";
+    return;
+  }
+  const confidence = toPercent(lifeState.confidence);
+  const completeness = toPercent(lifeState.context_completeness);
+  const tags = lifeState.short_term_tags?.length
+    ? lifeState.short_term_tags.slice(0, 8).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")
+    : "<span>暂无短期标签</span>";
+  const constraints = lifeState.constraints?.length
+    ? lifeState.constraints.slice(0, 6).map((tag) => `<span>${escapeHtml(tag)}</span>`).join("")
+    : "<span>暂无显式约束</span>";
+  const warnings = lifeState.warnings?.length
+    ? lifeState.warnings.slice(0, 4).map((item) => `<span>${escapeHtml(item)}</span>`).join("")
+    : "<span>context_ready</span>";
+  lifeStateSummary.innerHTML = `
+    <div class="life-state-metrics">
+      <div><strong>${confidence}</strong><small>置信度</small></div>
+      <div><strong>${completeness}</strong><small>完整度</small></div>
+      <div><strong>${lifeState.active_plan_count || 0}</strong><small>计划</small></div>
+      <div><strong>${lifeState.recommendation_count || 0}</strong><small>历史</small></div>
+    </div>
+    <div class="life-state-bar" aria-label="上下文完整度">
+      <span style="width: ${completeness};"></span>
+    </div>
+    <div class="life-state-section">
+      <small>短期信号</small>
+      <div class="life-state-tags">${tags}</div>
+    </div>
+    <div class="life-state-section">
+      <small>约束</small>
+      <div class="life-state-tags">${constraints}</div>
+    </div>
+    <div class="life-state-section">
+      <small>缺口</small>
+      <div class="life-state-tags warning-tags">${warnings}</div>
+    </div>
+  `;
 }
 
 function renderRecommendationHistory(history) {
@@ -552,10 +602,23 @@ function renderDailyBrief(data) {
         <small>${escapeHtml(formatPlanDateTime(data.generated_at))}</small>
       </div>
       <p>${escapeHtml(data.summary || "暂无简报内容。")}</p>
+      ${renderBriefLifeState(data.life_state)}
       ${renderBriefList("优先事项", data.priorities)}
       ${renderBriefList("风险信号", data.risk_flags)}
       ${renderBriefList("下一步", data.next_actions)}
     </article>
+  `;
+}
+
+function renderBriefLifeState(lifeState) {
+  if (!lifeState) {
+    return "";
+  }
+  return `
+    <div class="brief-life-state">
+      <span>Life State ${toPercent(lifeState.confidence)} confidence</span>
+      <span>${escapeHtml((lifeState.short_term_tags || []).slice(0, 3).join(" / ") || "no short-term tags")}</span>
+    </div>
   `;
 }
 
@@ -628,6 +691,9 @@ function renderPlanSummary(plans) {
 function renderResult(data) {
   state.requestId = data.request_id;
   refreshBtn.disabled = false;
+  if (data.life_state) {
+    renderLifeState(data.life_state);
+  }
   intentSummary.textContent = data.intent_summary;
   healthSummary.textContent = `${data.health_summary} ${data.strategy}`;
   aigcSummary.textContent = data.aigc_summary || "未生成 AIGC 摘要。";
@@ -699,6 +765,10 @@ function createCard(item) {
   const suggested = item.suggested_items.length
     ? `<div class="suggested">建议：${escapeHtml(item.suggested_items.join(" / "))}</div>`
     : "";
+  const execution = renderExecutionScore(item.execution);
+  const planSignal = renderPlanSignal(item.plan_signal);
+  const realness = renderRealnessCheck(item.realness);
+  const trace = renderRecommendationTrace(item.trace);
 
   card.innerHTML = `
     <div class="card-header">
@@ -712,6 +782,10 @@ function createCard(item) {
     <div class="tag-row">${tags}</div>
     <ol class="reason-list">${reasons}</ol>
     ${suggested}
+    ${realness}
+    ${execution}
+    ${planSignal}
+    ${trace}
     <div class="feedback-row">
       <button data-action="like">喜欢</button>
       <button data-action="dislike">不喜欢</button>
@@ -726,6 +800,127 @@ function createCard(item) {
   });
 
   return card;
+}
+
+function renderRealnessCheck(realness) {
+  if (!realness) {
+    return "";
+  }
+  const realnessScore = toPercent(realness.realness_score);
+  const risk = toPercent(realness.hallucination_risk);
+  const flags = realness.risk_flags?.length
+    ? realness.risk_flags.slice(0, 5).map((item) => `<span>${escapeHtml(item)}</span>`).join("")
+    : "<span>grounded</span>";
+  const forbidden = realness.forbidden_claims?.length
+    ? `<div class="realness-forbidden">${realness.forbidden_claims.slice(0, 4).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>`
+    : "";
+  return `
+    <div class="realness-panel">
+      <div class="realness-head">
+        <span>${escapeHtml(realness.label || "unknown")}</span>
+        <strong>${realnessScore}</strong>
+      </div>
+      <div class="realness-cost-row">
+        <span>幻觉风险 ${risk}</span>
+        <span>${realness.passed ? "Guard passed" : "Guard blocked"}</span>
+      </div>
+      <div class="realness-tags">${flags}</div>
+      ${forbidden}
+    </div>
+  `;
+}
+
+function renderPlanSignal(planSignal) {
+  if (!planSignal || (!planSignal.adjustment && !planSignal.evidence?.length)) {
+    return "";
+  }
+  const adjustment = Number(planSignal.adjustment || 0);
+  const label = adjustment > 0 ? `+${adjustment.toFixed(1)}` : adjustment.toFixed(1);
+  const evidence = planSignal.evidence?.length
+    ? planSignal.evidence.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : "<li>暂无计划证据</li>";
+  const blockers = planSignal.blockers?.length
+    ? planSignal.blockers.slice(0, 5).map((item) => `<span>${escapeHtml(item)}</span>`).join("")
+    : "<span>plan_context_ready</span>";
+  return `
+    <div class="plan-signal-panel">
+      <div class="plan-signal-head">
+        <span>计划感知排序</span>
+        <strong>${escapeHtml(label)}</strong>
+      </div>
+      <div class="plan-signal-tags">${blockers}</div>
+      <ol class="plan-signal-evidence">${evidence}</ol>
+    </div>
+  `;
+}
+
+function renderExecutionScore(execution) {
+  if (!execution) {
+    return "";
+  }
+  const score = toPercent(execution.executable_score);
+  const cost = toPercent(execution.execution_cost);
+  const blockers = execution.blockers?.length
+    ? execution.blockers.slice(0, 5).map((item) => `<span>${escapeHtml(item)}</span>`).join("")
+    : "<span>no_major_blocker</span>";
+  const evidence = execution.evidence?.length
+    ? execution.evidence.slice(0, 5).map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : "<li>暂无执行证据</li>";
+  return `
+    <div class="execution-panel">
+      <div class="execution-head">
+        <span>可执行性</span>
+        <strong>${score}</strong>
+      </div>
+      <div class="execution-bar" aria-label="可执行性分数">
+        <span style="width: ${score};"></span>
+      </div>
+      <div class="execution-cost-row">
+        <span>执行成本 ${cost}</span>
+        <span>置信度 ${toPercent(execution.confidence)}</span>
+      </div>
+      <div class="execution-tags">${blockers}</div>
+      <ol class="execution-evidence">${evidence}</ol>
+    </div>
+  `;
+}
+
+function renderRecommendationTrace(trace) {
+  if (!trace) {
+    return "";
+  }
+  const sources = trace.data_sources?.length
+    ? trace.data_sources.map((source) => `<span>${escapeHtml(source)}</span>`).join("")
+    : "<span>ranker.local_context</span>";
+  const evidence = trace.evidence?.length
+    ? trace.evidence.slice(0, 6).map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : "<li>暂无证据链</li>";
+  const penalties = trace.penalties?.length
+    ? trace.penalties.map((item) => `<span class="trace-penalty">${escapeHtml(item)}</span>`).join("")
+    : "<span>no_major_penalty</span>";
+  return `
+    <details class="trace-panel">
+      <summary>
+        <span>算法追踪</span>
+        <strong>${escapeHtml(String(trace.confidence ?? 0.5))}</strong>
+      </summary>
+      <div class="trace-grid">
+        <div>
+          <small>Ranker</small>
+          <p>${escapeHtml(trace.ranker || "life_rec_weighted_v0")}</p>
+        </div>
+        <div>
+          <small>Data Sources</small>
+          <div class="trace-tags">${sources}</div>
+        </div>
+        <div>
+          <small>Penalties</small>
+          <div class="trace-tags">${penalties}</div>
+        </div>
+      </div>
+      <ol class="trace-evidence">${evidence}</ol>
+    </details>
+  `;
 }
 
 async function sendFeedback(item, action, button) {
@@ -840,6 +1035,33 @@ async function updatePlanSchedule(planId, input, button) {
     button.disabled = false;
     setStatus("计划时间保存失败，请确认后端已启动。", "error");
     console.error(error);
+  }
+}
+
+async function exportUserMemory() {
+  exportMemoryBtn.disabled = true;
+  setStatus("正在导出完整用户记忆...", "loading");
+  try {
+    const response = await fetch(apiUrl(`/user/export?user_id=${encodeURIComponent(currentUserId())}&limit=300`));
+    if (!response.ok) {
+      throw new Error(`User memory export API returned ${response.status}`);
+    }
+    const data = await response.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `liferec-memory-${currentUserId()}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setStatus(`用户记忆已导出：${data.summary?.recommendations || 0} 条推荐历史。`, "ready");
+  } catch (error) {
+    setStatus("用户记忆导出失败，请确认后端已启动。", "error");
+    console.error(error);
+  } finally {
+    exportMemoryBtn.disabled = false;
   }
 }
 
@@ -965,6 +1187,14 @@ function countPreferences(preferences) {
     count += preferences[key]?.length || 0;
   });
   return count;
+}
+
+function toPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return "0%";
+  }
+  return `${Math.round(Math.max(0, Math.min(1, number)) * 100)}%`;
 }
 
 function formatScenarioLabel(value) {

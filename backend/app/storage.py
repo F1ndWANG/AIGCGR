@@ -265,7 +265,7 @@ def feedback_summary(user_id: str, limit: int = 200) -> dict[str, Any]:
     for row in rows:
         action = str(row["action"])
         tags = _loads_list(row["tags_json"])
-        bucket = "positive" if action in {"like", "save", "plan"} else "negative"
+        bucket = "positive" if action in {"like", "save", "plan", "done"} else "negative"
         profile[bucket]["items"][row["item_name"]] = profile[bucket]["items"].get(row["item_name"], 0) + 1
         for tag in tags:
             profile[bucket]["tags"][tag] = profile[bucket]["tags"].get(tag, 0) + 1

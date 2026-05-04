@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .aigc import build_daily_brief, build_life_brief
 from .config import settings
 from .data_loader import load_dataset
+from .life_state import encode_life_state
 from .models import (
     AigcBriefRequest,
     AigcBriefResponse,
@@ -14,6 +15,7 @@ from .models import (
     FeedbackRequest,
     FeedbackResponse,
     FeedbackSummaryResponse,
+    LifeStateSnapshot,
     MealHistoryResponse,
     MealLogRequest,
     MealLogResponse,
@@ -35,6 +37,7 @@ from .models import (
     RouteRequest,
     RouteResponse,
     UserContextResponse,
+    UserMemoryExportResponse,
     UserPreferencesRequest,
     UserPreferencesResponse,
     WellnessHistoryResponse,
@@ -274,6 +277,12 @@ def get_wellness_logs(user_id: str = "u001", limit: int = 20) -> WellnessHistory
     )
 
 
+@app.get("/api/user/life-state", response_model=LifeStateSnapshot)
+def get_life_state(user_id: str = "u001", limit: int = 20) -> LifeStateSnapshot:
+    safe_limit = max(1, min(limit, 100))
+    return _build_life_state(user_id=user_id, limit=safe_limit)
+
+
 @app.get("/api/user/context", response_model=UserContextResponse)
 def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextResponse:
     safe_limit = max(1, min(limit, 100))
@@ -285,6 +294,17 @@ def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextRespo
     recommendations = recommendation_history(user_id=user_id, limit=5)
     preferences = UserPreferencesResponse(**user_preferences(user_id=user_id))
     plans = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="active", limit=10)]
+    life_state = encode_life_state(
+        user_id=user_id,
+        meals=meals,
+        wellness=wellness,
+        preferences=preferences,
+        feedback=feedback,
+        plans=plans,
+        recommendations=recommendations,
+        recent_meal_tags=tags,
+        recent_wellness_tags=wellness_tags,
+    )
     return UserContextResponse(
         user_id=user_id,
         recent_meal_tags=tags,
@@ -295,6 +315,7 @@ def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextRespo
         feedback=feedback,
         preferences=preferences,
         plans=plans,
+        life_state=life_state,
         storage=storage_status(),
         context_sources={
             "meals": "runtime.sqlite.meal_events",
@@ -304,6 +325,92 @@ def get_user_context(user_id: str = "u001", limit: int = 20) -> UserContextRespo
             "provider_cache": "runtime.sqlite.api_cache",
             "preferences": "runtime.sqlite.user_preferences",
             "plans": "runtime.sqlite.plan_items",
+        },
+    )
+
+
+def _build_life_state(user_id: str, limit: int) -> LifeStateSnapshot:
+    safe_limit = max(1, min(limit, 100))
+    meals = meal_history(user_id=user_id, limit=safe_limit)
+    wellness = wellness_history(user_id=user_id, limit=safe_limit)
+    feedback = FeedbackSummaryResponse(**feedback_summary(user_id=user_id, limit=safe_limit))
+    preferences = UserPreferencesResponse(**user_preferences(user_id=user_id))
+    plans = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="active", limit=safe_limit)]
+    recommendations = recommendation_history(user_id=user_id, limit=safe_limit)
+    return encode_life_state(
+        user_id=user_id,
+        meals=meals,
+        wellness=wellness,
+        preferences=preferences,
+        feedback=feedback,
+        plans=plans,
+        recommendations=recommendations,
+        recent_meal_tags=recent_meal_tags(user_id=user_id, limit=safe_limit),
+        recent_wellness_tags=recent_wellness_tags(user_id=user_id, limit=safe_limit),
+    )
+
+
+@app.get("/api/user/export", response_model=UserMemoryExportResponse)
+def export_user_memory(user_id: str = "u001", limit: int = 200) -> UserMemoryExportResponse:
+    safe_limit = max(1, min(limit, 500))
+    meals = meal_history(user_id=user_id, limit=safe_limit)
+    wellness = wellness_history(user_id=user_id, limit=safe_limit)
+    feedback = FeedbackSummaryResponse(**feedback_summary(user_id=user_id, limit=safe_limit))
+    preferences = UserPreferencesResponse(**user_preferences(user_id=user_id))
+    active = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="active", limit=safe_limit)]
+    done = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="done", limit=safe_limit)]
+    canceled = [PlanItemResponse(**item) for item in plan_items(user_id=user_id, status="canceled", limit=safe_limit)]
+    recommendations = recommendation_history(user_id=user_id, limit=safe_limit)
+    plans = PlanExportResponse(
+        user_id=user_id,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        summary={
+            "active": len(active),
+            "done": len(done),
+            "canceled": len(canceled),
+            "total": len(active) + len(done) + len(canceled),
+        },
+        active=active,
+        done=done,
+        canceled=canceled,
+    )
+    life_state = encode_life_state(
+        user_id=user_id,
+        meals=meals,
+        wellness=wellness,
+        preferences=preferences,
+        feedback=feedback,
+        plans=active,
+        recommendations=recommendations,
+        recent_meal_tags=recent_meal_tags(user_id=user_id, limit=safe_limit),
+        recent_wellness_tags=recent_wellness_tags(user_id=user_id, limit=safe_limit),
+    )
+    return UserMemoryExportResponse(
+        user_id=user_id,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        summary={
+            "meals": len(meals),
+            "wellness": len(wellness),
+            "feedback_events": len(feedback.events),
+            "plans": plans.summary["total"],
+            "recommendations": len(recommendations),
+        },
+        recent_meal_tags=recent_meal_tags(user_id=user_id, limit=safe_limit),
+        recent_wellness_tags=recent_wellness_tags(user_id=user_id, limit=safe_limit),
+        meals=meals,
+        wellness=wellness,
+        feedback=feedback,
+        preferences=preferences,
+        plans=plans,
+        recommendations=recommendations,
+        life_state=life_state,
+        context_sources={
+            "meals": "runtime.sqlite.meal_events",
+            "wellness": "runtime.sqlite.wellness_events",
+            "feedback": "runtime.sqlite.feedback_events",
+            "preferences": "runtime.sqlite.user_preferences",
+            "plans": "runtime.sqlite.plan_items",
+            "recommendations": "runtime.sqlite.recommendation_events",
         },
     )
 
@@ -324,16 +431,32 @@ def get_daily_brief(user_id: str = "u001", limit: int = 20) -> DailyBriefRespons
     wellness = wellness_history(user_id=user_id, limit=safe_limit)
     plans = [PlanItemResponse(**item).model_dump() for item in plan_items(user_id=user_id, status="active", limit=10)]
     recommendations = recommendation_history(user_id=user_id, limit=5)
+    meal_tags = recent_meal_tags(user_id=user_id, limit=safe_limit)
+    wellness_tags = recent_wellness_tags(user_id=user_id, limit=safe_limit)
+    preferences = UserPreferencesResponse(**user_preferences(user_id=user_id))
+    feedback = FeedbackSummaryResponse(**feedback_summary(user_id=user_id))
+    life_state = encode_life_state(
+        user_id=user_id,
+        meals=meals,
+        wellness=wellness,
+        preferences=preferences,
+        feedback=feedback,
+        plans=plans,
+        recommendations=recommendations,
+        recent_meal_tags=meal_tags,
+        recent_wellness_tags=wellness_tags,
+    )
     context = {
         "user_id": user_id,
-        "recent_meal_tags": recent_meal_tags(user_id=user_id, limit=safe_limit),
-        "recent_wellness_tags": recent_wellness_tags(user_id=user_id, limit=safe_limit),
+        "recent_meal_tags": meal_tags,
+        "recent_wellness_tags": wellness_tags,
         "meals": meals,
         "wellness": wellness,
-        "preferences": UserPreferencesResponse(**user_preferences(user_id=user_id)).model_dump(),
-        "feedback": FeedbackSummaryResponse(**feedback_summary(user_id=user_id)).model_dump(),
+        "preferences": preferences.model_dump(),
+        "feedback": feedback.model_dump(),
         "plans": plans,
         "recent_recommendations": recommendations,
+        "life_state": life_state.model_dump(),
         "storage": storage_status(),
     }
     brief = build_daily_brief(context)
@@ -345,6 +468,7 @@ def get_daily_brief(user_id: str = "u001", limit: int = 20) -> DailyBriefRespons
         priorities=[str(item) for item in brief.get("priorities", [])],
         risk_flags=[str(item) for item in brief.get("risk_flags", [])],
         next_actions=[str(item) for item in brief.get("next_actions", [])],
+        life_state=life_state,
         context_sources={
             "meals": "runtime.sqlite.meal_events",
             "wellness": "runtime.sqlite.wellness_events",
@@ -442,6 +566,18 @@ def update_plan_status(plan_id: int, request: PlanStatusUpdateRequest) -> PlanIt
     updated = update_plan_item(plan_id=plan_id, user_id=request.user_id, updates=updates)
     if not updated:
         raise HTTPException(status_code=404, detail="Plan item not found")
+    if "status" in updates and updates["status"] in {"done", "canceled"}:
+        save_feedback_event(
+            request_id=updated.get("request_id"),
+            user_id=request.user_id,
+            item_id=updated["item_id"],
+            item_name=updated["item_name"],
+            item_type=updated["item_type"],
+            action=updates["status"],
+            reason=f"plan_status:{updates['status']}",
+            tags=updated.get("tags", []),
+            source=updated.get("source"),
+        )
     return PlanItemResponse(**updated)
 
 

@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 Scenario = Literal["auto", "diet", "restaurant", "shopping", "travel"]
 ProductProviderName = Literal["auto", "aigc", "local"]
-FeedbackAction = Literal["like", "dislike", "save", "plan", "skip"]
+FeedbackAction = Literal["like", "dislike", "save", "plan", "skip", "done", "canceled"]
 PlanStatus = Literal["active", "done", "canceled"]
 
 
@@ -35,6 +35,74 @@ class ScoreBreakdown(BaseModel):
     budget: float
     distance: float
     context: float
+    execution: float = 0.5
+    realness: float = 0.5
+
+
+class RecommendationTrace(BaseModel):
+    ranker: str = "life_rec_weighted_v0"
+    score_formula: str = "0.25*preference + 0.25*health + 0.18*budget + 0.17*distance + 0.15*context"
+    data_sources: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    penalties: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+
+
+class ExecutionScore(BaseModel):
+    scorer: str = "execution_cost_v0"
+    executable_score: float = 0.5
+    execution_cost: float = 0.5
+    distance_cost: float = 0.5
+    budget_cost: float = 0.5
+    time_cost: float = 0.5
+    weather_cost: float = 0.5
+    complexity_cost: float = 0.5
+    data_risk: float = 0.5
+    blockers: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    confidence: float = 0.5
+
+
+class PlanSignal(BaseModel):
+    ranker: str = "plan_aware_v0"
+    adjustment: float = 0
+    duplicate_active: bool = False
+    schedule_conflict: bool = False
+    completed_tag_boost: float = 0
+    canceled_tag_penalty: float = 0
+    active_overlap: float = 0
+    evidence: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+
+
+class RealnessCheck(BaseModel):
+    verifier: str = "aigc_verifier_v0"
+    label: str = "unknown"
+    realness_score: float = 0.5
+    hallucination_risk: float = 0.5
+    passed: bool = True
+    data_sources: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    forbidden_claims: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+
+
+class LifeStateSnapshot(BaseModel):
+    user_id: str
+    generated_at: str
+    short_term_tags: list[str] = Field(default_factory=list)
+    long_term_tags: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    active_plan_count: int = 0
+    scheduled_plan_count: int = 0
+    recommendation_count: int = 0
+    positive_feedback_count: int = 0
+    negative_feedback_count: int = 0
+    context_completeness: float = 0
+    confidence: float = 0
+    source_counts: dict[str, int] = Field(default_factory=dict)
+    vector: dict[str, float] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class RecommendationItem(BaseModel):
@@ -47,6 +115,10 @@ class RecommendationItem(BaseModel):
     suggested_items: list[str] = []
     meta: dict[str, str | float | int] = {}
     score_breakdown: ScoreBreakdown
+    execution: ExecutionScore = Field(default_factory=ExecutionScore)
+    plan_signal: PlanSignal = Field(default_factory=PlanSignal)
+    realness: RealnessCheck = Field(default_factory=RealnessCheck)
+    trace: RecommendationTrace = Field(default_factory=RecommendationTrace)
 
 
 class RecommendationResponse(BaseModel):
@@ -56,6 +128,7 @@ class RecommendationResponse(BaseModel):
     health_summary: str
     strategy: str
     context: dict[str, str | float | int | bool | None] = {}
+    life_state: LifeStateSnapshot | None = None
     aigc_summary: str | None = None
     recommendations: list[RecommendationItem]
     plan: list[str]
@@ -176,6 +249,7 @@ class DailyBriefResponse(BaseModel):
     priorities: list[str]
     risk_flags: list[str]
     next_actions: list[str]
+    life_state: LifeStateSnapshot | None = None
     context_sources: dict[str, str]
 
 
@@ -199,6 +273,7 @@ class ProductItem(BaseModel):
     reason: str | None = None
     purchase_hint: str | None = None
     source: str
+    realness: RealnessCheck = Field(default_factory=RealnessCheck)
 
 
 class ProductSearchResponse(BaseModel):
@@ -368,7 +443,24 @@ class UserContextResponse(BaseModel):
     feedback: FeedbackSummaryResponse
     preferences: UserPreferencesResponse
     plans: list[PlanItemResponse]
+    life_state: LifeStateSnapshot
     storage: dict[str, str | int]
+    context_sources: dict[str, str]
+
+
+class UserMemoryExportResponse(BaseModel):
+    user_id: str
+    generated_at: str
+    summary: dict[str, int]
+    recent_meal_tags: list[str]
+    recent_wellness_tags: list[str]
+    meals: list[MealEvent]
+    wellness: list[WellnessEvent]
+    feedback: FeedbackSummaryResponse
+    preferences: UserPreferencesResponse
+    plans: PlanExportResponse
+    recommendations: list[RecommendationHistoryItem]
+    life_state: LifeStateSnapshot
     context_sources: dict[str, str]
 
 

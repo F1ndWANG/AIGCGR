@@ -1,80 +1,126 @@
-# LifeRec
+# LifeRec: AIGC + 生成式推荐生活推荐系统
 
-LifeRec 是一个开源的 AI 生活推荐系统原型，目标是把“我今天该吃什么、买什么、去哪儿、怎么安排”这类自然语言需求，转化为可执行的个性化生活方案。
+LifeRec 是一个开源 AI 生活推荐系统原型，目标是把“我今天该吃什么、买什么、去哪儿、怎么安排”这类自然语言需求，转化为可执行、可解释、可持续学习的个性化生活方案。
 
-项目结合 AIGC、生成式推荐、动态位置、真实生活服务 API、用户反馈和运行时生活记录，覆盖健康饮食、附近餐厅、AIGC 商品需求清单和旅行规划等场景。
+项目结合 AIGC、生成式推荐、动态位置、真实生活服务 API、运行时用户记忆、计划反馈学习和真实性防护，覆盖健康饮食、附近餐厅、AIGC 商品需求清单、旅行规划和每日生活简报等场景。
 
-> 当前定位：`v0.2` 可运行 MVP。它不是静态 Demo，而是已经具备真实 Provider、运行时用户数据、反馈重排、换一批推荐和评估脚本的完整实验项目。
+当前定位：`v0.2` 可运行 MVP。它不是静态 Demo，而是具备真实 Provider、SQLite 运行时数据、算法追踪、Life State Vector、可执行性重排、计划感知排序、AIGC 真实性防护和自动化测试的完整实验项目。
 
-## 项目亮点
+## 需求分析
 
-- 真实动态推荐：餐厅、景点、天气、步行路线优先来自高德 Web 服务 API。
-- AIGC 商品生成：不依赖淘宝、京东、拼多多，生成商品需求、预算参考和购买前检查项。
-- 用户生活记忆：SQLite 保存饮食记录、生活状态、长期偏好、计划列表、推荐历史、用户反馈和 Provider 缓存。
-- 健康约束推断：根据近期饮食标签识别高油、高盐、蔬菜少、蛋白不足等状态。
-- Wellness 信号：睡眠不足、运动不足、压力高等生活状态会进入推荐健康约束。
-- 反馈学习：喜欢、不喜欢、加入计划等行为会影响后续排序。
-- 长期画像：默认地点、预算、口味、忌口、过敏、健康目标和旅行偏好会自动补全推荐上下文。
-- 计划落地：推荐卡片可加入 active 计划列表，并支持设置执行时间、完成或取消计划项。
-- 计划导出：可将计划导出为 JSON 或 iCalendar `.ics`，ICS 会优先使用用户设置的执行时间。
-- 轻量多用户：前端可切换用户 ID，不同用户的饮食、偏好、反馈和计划分开保存。
-- 换一批推荐：基于 `request_id` 排除上一批结果，重新生成替代方案。
-- 真实数据边界：严格模式下不使用本地样例补餐厅、景点或商品结果。
-- 工程化基础：FastAPI、原生 Web 前端、Docker、pytest、GitHub Actions、公开密钥扫描。
+明确用户需求：
 
-## 工作流
+- 用户希望用自然语言描述生活需求，例如“不想吃饭”“附近有什么健康餐厅”“帮我做购物清单”“周末去哪玩”。
+- 系统需要结合当前位置、预算、饮食记录、生活状态、长期偏好、反馈、计划和真实 Provider 数据生成推荐。
+- 推荐结果不能只是聊天文本，还要能转化为行动计划、路线、商品需求、餐厅选择和后续反馈。
+- AIGC 可以生成解释和商品需求，但不能虚构真实餐厅、菜单、SKU、库存、折扣、购买链接或实时价格。
+
+可行性研究：
+
+- 地点、天气、路线使用高德 Web 服务 API，保证外部生活服务数据可追溯。
+- 商品部分不依赖淘宝、京东、拼多多，采用 AIGC 生成“商品需求清单”，并明确不代表真实交易信息。
+- 用户记忆使用 SQLite 保存，适合本地运行、实验迭代和后续迁移到 PostgreSQL。
+- 推荐算法采用可逐步扩展的模块化设计，便于后续做论文、实验和开源演进。
+
+需求规格说明：
+
+- 必须支持饮食、餐厅、购物、旅行四类核心场景。
+- 必须支持多用户 `user_id` 隔离。
+- 必须支持真实运行时记忆：饮食、生活状态、偏好、反馈、计划、推荐历史。
+- 必须返回可解释结果：评分、证据链、数据来源、扣分项、执行成本和真实性风险。
+- 必须提供测试、安全扫描和 `.env` 密钥隔离。
+
+## 系统设计
+
+概要设计：
 
 ```text
-自然语言需求
-  -> 意图识别
-  -> 用户上下文：位置、饮食记录、反馈画像、偏好
-  -> Provider：高德 POI / 天气 / 路线 + OpenAI-compatible LLM
-  -> 候选生成与排序
-  -> AIGC 解释
-  -> 推荐卡片、行动计划、后续反馈
+Frontend
+  -> FastAPI Backend
+  -> Intent Parser
+  -> Runtime User Context
+  -> Life State Vector
+  -> Provider Layer: Amap + OpenAI-compatible LLM
+  -> Candidate Generation
+  -> Multi-objective Ranking
+  -> Execution / Plan / Realness Reranking
+  -> Recommendation Cards + Plan + Feedback
 ```
 
-## 当前能力
+模块划分：
 
-| 场景 | 已实现能力 | 数据来源 |
-|---|---|---|
-| 健康饮食 | 根据近期饮食、生活状态、忌口、预算和口味生成餐饮建议 | 用户输入 + SQLite 饮食/生活状态 |
-| 附近餐厅 | 基于当前位置或城市推荐附近真实 POI | 高德地点搜索 |
-| 菜品建议 | 给出健康选择原则和点餐方向 | 规则 + AIGC 解释 |
-| 生活购物 | 生成商品类型、预算参考、购买标准 | LLM / AIGC |
-| 旅行规划 | 推荐目的地、景点和轻量行程 | 高德 POI + 规则排序 |
-| 天气路线 | 推荐结果加入天气、步行距离和耗时 | 高德天气 + 高德路线 |
-| 用户反馈 | 保存喜欢、不喜欢、加入计划并影响重排 | SQLite |
-| 用户上下文 | 聚合饮食记录、长期偏好、反馈画像、存储状态 | `/api/user/context` |
-| 推荐历史 | 查询用户真实生成过的推荐请求、上下文和 Top 候选 | `/api/user/recommendations` |
-| 今日简报 | 基于饮食、生活状态、计划和推荐历史生成 AIGC 生活简报 | `/api/user/daily-brief` |
-| 生活状态 | 记录睡眠、运动、压力和状态标签 | SQLite |
-| 行动计划 | 将推荐项保存为可执行计划项，并管理执行时间与 active/done/canceled 状态 | SQLite |
-| 计划导出 | 导出结构化计划 JSON 或可导入日历的 ICS | `/api/user/plans/export`、`/api/user/plans/export.ics` |
-| 用户隔离 | 前端切换用户 ID，运行时数据按 `user_id` 分区 | SQLite |
-| 推荐评估 | 检查重复、预算、距离、真实数据、健康冲突 | 本地评估脚本 |
-
-## 技术栈
-
-| 层级 | 技术 |
+| 模块 | 说明 |
 |---|---|
-| 后端 | Python, FastAPI, Pydantic, httpx |
-| 推荐核心 | 规则召回、动态距离、健康约束、反馈重排 |
-| AIGC | OpenAI-compatible LLM，默认模型 `deepseek-v4-flash` |
-| 地图服务 | 高德 Web 服务 API |
-| 前端 | 原生 HTML/CSS/JavaScript |
-| 存储 | SQLite，默认位于 `runtime/liferec.sqlite3` |
-| 工程化 | Docker, pytest, GitHub Actions, PowerShell scripts |
+| `backend/app/main.py` | FastAPI 路由入口 |
+| `backend/app/recommender.py` | 推荐主链路、意图识别、候选生成和排序 |
+| `backend/app/life_state.py` | Life State Vector 用户状态编码 |
+| `backend/app/execution.py` | ExecutionCostScorer，可执行性评分 |
+| `backend/app/plan_ranker.py` | PlanAwareRanker，计划感知排序 |
+| `backend/app/aigc_verifier.py` | AIGCVerifier，真实性与幻觉风险校验 |
+| `backend/app/product_providers.py` | AIGC 商品需求生成与本地 fallback |
+| `backend/app/providers.py` | 高德地点、天气、路线 Provider |
+| `backend/app/storage.py` | SQLite 运行时记忆和缓存 |
+| `frontend/` | 原生 HTML/CSS/JavaScript Web MVP |
+| `tests/` | pytest 自动化测试 |
 
-## 快速开始
+详细设计：
 
-### 1. 配置环境变量
+- `RecommendationTrace`：记录 ranker、评分公式、数据源、证据、扣分项和置信度。
+- `LifeStateSnapshot`：把饮食、生活状态、偏好、反馈、计划、推荐历史编码为动态用户状态。
+- `ExecutionScore`：融合距离、预算、路线时间、天气、复杂度和数据风险，计算可执行性。
+- `PlanSignal`：用 active/done/canceled 计划做重复抑制、完成偏好增强和取消偏好惩罚。
+- `RealnessCheck`：区分 `provider_grounded`、`aigc_product_need`、`development_sample`，检测购买链接、SKU、库存、折扣、实时价格等禁止声明。
+- `ScoreBreakdown`：包含 preference、health、budget、distance、context、execution、realness 等分项。
+
+## 编码实现
+
+后端实现：
+
+- 使用 Python + FastAPI + Pydantic 构建 API。
+- 使用 SQLite 保存运行时用户数据，默认路径为 `runtime/liferec.sqlite3`。
+- 使用高德 Web 服务 API 获取 POI、逆地理编码、天气和步行路线。
+- 使用 OpenAI-compatible LLM，默认模型配置为 `deepseek-v4-flash`。
+- 使用 AIGC 商品需求生成，不声称真实 SKU、库存、折扣或购买链接。
+
+前端实现：
+
+- 原生 HTML/CSS/JavaScript，无复杂构建链。
+- 支持 API Base URL 切换、用户 ID 切换、当前位置获取。
+- 支持饮食记录、生活状态记录、长期偏好保存、计划管理、推荐历史、每日简报和用户记忆导出。
+- 推荐卡片展示算法追踪、可执行性评分、计划感知信号和真实性风险。
+
+主要 API：
+
+| API | 用途 |
+|---|---|
+| `GET /api/health` | 健康检查和存储状态 |
+| `GET /api/providers/capabilities` | 查看高德、AIGC、商品、缓存 Provider 状态 |
+| `POST /api/recommend` | 统一生活推荐入口 |
+| `POST /api/recommend/refresh` | 基于 `request_id` 换一批 |
+| `GET /api/user/life-state` | 动态生活状态向量 |
+| `GET /api/user/context` | 聚合用户上下文 |
+| `GET /api/user/export` | 导出完整用户记忆 JSON |
+| `GET /api/user/daily-brief` | 生成 AIGC 今日生活简报 |
+| `POST /api/user/meals` / `GET /api/user/meals` | 饮食记录写入和查询 |
+| `POST /api/user/wellness` / `GET /api/user/wellness` | 生活状态写入和查询 |
+| `PUT /api/user/preferences` / `GET /api/user/preferences` | 长期偏好保存和查询 |
+| `POST /api/user/plans` / `PATCH /api/user/plans/{plan_id}` | 计划创建和状态更新 |
+| `GET /api/user/plans/export` / `GET /api/user/plans/export.ics` | 计划 JSON / ICS 导出 |
+| `POST /api/context/nearby` | 附近地点查询 |
+| `POST /api/context/places/search` | 城市或关键词地点搜索 |
+| `GET /api/context/weather` | 实时天气 |
+| `POST /api/context/route/walking` | 步行路线 |
+| `POST /api/context/products/search` | AIGC 商品需求清单 |
+
+本地运行：
 
 ```powershell
 Copy-Item .env.example .env
+.\scripts\dev_backend.ps1
+.\scripts\dev_frontend.ps1
 ```
 
-推荐配置：
+推荐环境变量：
 
 ```env
 AMAP_API_KEY=你的高德Web服务Key
@@ -87,154 +133,23 @@ PROVIDER_CACHE_TTL_SECONDS=300
 CORS_ALLOW_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 ```
 
-`.env` 已被 `.gitignore` 忽略，不会提交到 GitHub。
+`.env` 已被 `.gitignore` 忽略，不应提交到 GitHub。
 
-### 2. 启动后端
+## 软件测试
 
-```powershell
-.\scripts\dev_backend.ps1
-```
+测试目标：
 
-后端地址：
+- 发现并修复推荐链路、用户记忆、Provider 边界、AIGC 生成和前端交互中的错误。
+- 覆盖单元测试、集成测试、系统级接口测试和安全检查。
+- 确保严格真实数据模式下不会把本地样例伪装成真实推荐。
 
-```text
-http://127.0.0.1:8000
-```
-
-API 文档：
-
-```text
-http://127.0.0.1:8000/docs
-```
-
-### 3. 启动前端
-
-```powershell
-.\scripts\dev_frontend.ps1
-```
-
-前端地址：
-
-```text
-http://127.0.0.1:5173
-```
-
-前端默认调用：
-
-```text
-http://localhost:8000/api
-```
-
-如果后端部署在其他机器或云端，可以在页面左侧 `API Endpoint` 中修改并保存 API Base URL，例如 `https://your-domain.com/api`，无需改源码。
-
-部署到公网域名时，还需要在后端 `.env` 中把前端域名加入 `CORS_ALLOW_ORIGINS`，例如：
-
-```env
-CORS_ALLOW_ORIGINS=https://your-frontend-domain.com
-```
-
-### 4. Docker 启动
-
-```powershell
-docker compose up --build
-```
-
-## 示例请求
-
-饮食餐厅：
-
-```text
-我今天不想吃饭，最近吃得有点油腻，学校附近有什么健康一点的？
-```
-
-AIGC 商品：
-
-```text
-我想开始健康饮食，帮我推荐一份购物清单。
-```
-
-旅行规划：
-
-```text
-我周末从南京出发玩两天，预算 1000，不想太累。
-```
-
-## 主要 API
-
-| API | 用途 |
-|---|---|
-| `GET /api/health` | 后端健康检查和存储状态 |
-| `GET /api/providers/capabilities` | 查看高德、AIGC、商品、缓存等 Provider 状态 |
-| `POST /api/recommend` | 统一生活推荐入口 |
-| `POST /api/recommend/refresh` | 基于 `request_id` 排除上一批结果并换一批 |
-| `GET /api/user/context` | 聚合用户饮食记录、长期偏好、反馈画像和上下文来源 |
-| `GET /api/user/recommendations` | 查看用户最近真实生成过的推荐请求和 Top 候选 |
-| `GET /api/user/daily-brief` | 基于用户真实上下文生成今日 AIGC 生活简报 |
-| `GET /api/user/preferences` | 查看长期用户偏好画像 |
-| `PUT /api/user/preferences` | 保存默认地点、预算、口味、忌口、过敏、健康目标和旅行偏好 |
-| `POST /api/user/wellness` | 保存睡眠、运动、压力和生活状态标签 |
-| `GET /api/user/wellness` | 查看近期生活状态记录和标签 |
-| `POST /api/user/plans` | 将推荐项加入用户计划列表 |
-| `GET /api/user/plans` | 查看用户计划列表 |
-| `GET /api/user/plans/export` | 导出用户计划 JSON |
-| `GET /api/user/plans/export.ics` | 导出用户计划 iCalendar 文件 |
-| `PATCH /api/user/plans/{plan_id}` | 更新计划状态、标题、备注或 `scheduled_for` 执行时间 |
-| `POST /api/user/meals` | 保存用户真实饮食记录 |
-| `GET /api/user/meals` | 查看用户近期饮食记录和标签 |
-| `POST /api/feedback` | 保存用户对推荐项的真实反馈 |
-| `GET /api/feedback/summary` | 查看用户反馈画像摘要 |
-| `POST /api/context/nearby` | 查询附近地点，高德优先 |
-| `POST /api/context/places/search` | 按城市或关键词搜索地点，高德优先 |
-| `GET /api/context/geocode/reverse` | 经纬度转地址和 adcode |
-| `GET /api/context/weather` | 查询实时天气 |
-| `POST /api/context/route/walking` | 查询步行路线 |
-| `POST /api/context/products/search` | AIGC 商品需求清单生成 |
-| `POST /api/aigc/brief` | AIGC 推荐策略摘要 |
-
-## 真实数据策略
-
-LifeRec 明确区分真实外部数据、用户运行时数据、AIGC 生成内容和本地开发样例。
-
-| 类型 | 来源 | 说明 |
-|---|---|---|
-| 地点、天气、路线 | 高德 Web 服务 API | 配置 `AMAP_API_KEY` 后启用 |
-| 商品建议 | AIGC | 不声称真实 SKU、库存、折扣或购买链接 |
-| 饮食记录 | 用户主动输入 | 写入 SQLite，只用于健康约束和排序 |
-| 生活状态 | 用户主动输入 | 写入 SQLite，用于一般生活推荐约束，不做医疗诊断 |
-| 长期偏好 | 用户主动设置 | 写入 SQLite，用于补全后续推荐上下文 |
-| 推荐历史 | 每次生成推荐 | 写入 SQLite，用于历史复盘、换一批和后续 Agent 接力 |
-| 计划列表 | 用户点击加入计划 | 写入 SQLite，用于保存待执行推荐项 |
-| 用户反馈 | 用户点击行为 | 写入 SQLite，只影响后续排序 |
-| 本地 JSON | `data/` | 仅开发 fallback，严格模式不补推荐结果 |
-
-开启严格真实数据模式：
-
-```env
-STRICT_REAL_DATA=true
-```
-
-在该模式下，如果高德或 LLM 没有返回可用结果，系统会返回空结果或说明不可用，不会用本地样例伪装成真实推荐。
-
-## 项目结构
-
-```text
-LifeRec
-├── backend/              FastAPI 服务、Provider、推荐核心、评估逻辑
-├── data/                 本地开发样例数据，严格模式下不补真实结果
-├── docs/                 架构、API、真实数据、部署、测试和路线图文档
-├── frontend/             Web MVP
-├── scripts/              开发启动、评估和安全检查脚本
-├── tests/                pytest 测试
-├── AIGC+GR.md            AIGC 与生成式推荐分析文档
-└── README.md
-```
-
-## 测试与质量
+测试命令：
 
 ```powershell
 python -m pip install -r backend/requirements-dev.txt
 python -m pytest
 python -m compileall backend
+node --check frontend/app.js
 .\scripts\check_public_safety.ps1
 ```
 
@@ -244,16 +159,44 @@ python -m compileall backend
 python scripts\evaluate_recommendations.py --request request.json --response response.json
 ```
 
-当前评估覆盖：
+当前测试覆盖：
 
-- 推荐结果不能重复。
-- 换一批排除项不能再次返回。
-- 候选距离不能超过请求半径。
-- 候选价格不应明显超过预算。
-- 严格真实数据模式不能返回 `sample-data`。
-- 近期高油时不应优先返回油炸、重油标签。
+- API 健康检查、CORS、Provider 能力。
+- 饮食、生活状态、偏好、反馈、计划、推荐历史和用户记忆导出。
+- Life State Vector 动态编码。
+- RecommendationTrace 证据链。
+- ExecutionCostScorer 可执行性评分。
+- PlanAwareRanker 计划感知排序。
+- AIGCVerifier 禁止声明检测和严格模式过滤。
+- 预算、距离、真实数据、健康冲突、低可执行性和幻觉风险评估。
+- 前端 JavaScript 语法检查。
+- 公开密钥扫描。
 
-## 文档
+## 运行维护
+
+交付后维护重点：
+
+- 纠错维护：修复 Provider 异常、AIGC 输出越界、推荐排序异常和前端交互问题。
+- 适应性维护：支持新的地图服务、LLM Provider、数据库和部署环境。
+- 完善性维护：继续扩展算法模块和产品功能。
+- 安全维护：持续避免提交 `.env`、API Key、运行时缓存和用户隐私数据。
+
+真实数据边界：
+
+- 地点、天气、路线来自高德 Provider。
+- 商品建议是 AIGC 商品需求生成，不是实时交易信息。
+- 高德 POI 不提供完整菜单，菜品建议是健康选择原则，不代表餐厅真实菜单。
+- LifeRec 只提供一般生活方式建议，不提供医疗诊断、治疗建议或处方建议。
+
+后续路线：
+
+- Phase 6：反馈权重学习，引入时间衰减和用户级标签权重。
+- Phase 7：Bandit 探索，平衡稳定偏好和新选项。
+- 数据库迁移：从 SQLite 迁移到 PostgreSQL。
+- 用户体系：增加认证、权限隔离和多用户部署能力。
+- Provider 扩展：增加驾车、公交、骑行、日历、运动、睡眠和菜单数据。
+
+## 文档索引
 
 | 文档 | 内容 |
 |---|---|
@@ -263,25 +206,9 @@ python scripts\evaluate_recommendations.py --request request.json --response res
 | [API 清单与获取方式](docs/api-providers.md) | 所需 API 和申请方式 |
 | [API 设置指南](docs/api-setup-guide.md) | `.env` 配置和验证方法 |
 | [AIGC 模块设计](docs/aigc-integration.md) | LLM 调用和 Prompt 边界 |
+| [算法创新路线](docs/algorithm-innovation-roadmap.md) | Life State、可执行推荐、计划反馈和真实性防护 |
 | [真实数据策略](docs/real-data-policy.md) | 数据真实性和 fallback 规则 |
 | [反馈闭环](docs/feedback-loop.md) | 用户反馈、饮食记录和重排 |
 | [部署与运行](docs/deployment.md) | 本地和 Docker 运行 |
 | [测试与质量检查](docs/testing.md) | 自动化测试和评估 |
 | [Roadmap](docs/roadmap.md) | 后续方向 |
-
-## Roadmap
-
-- 增加认证和权限隔离，替换当前轻量用户 ID 切换。
-- 从 SQLite 迁移到 PostgreSQL，支持多人长期部署。
-- 接入更多路线能力：驾车、公交、骑行。
-- 支持用户导入商品链接、菜单、运动、睡眠和日历数据。
-- 引入向量检索与语义召回。
-- 增加多 Agent 任务规划：餐厅、路线、购物、旅行分工协作。
-
-## 安全说明
-
-- 不要提交 `.env` 或任何 API Key。
-- 所有第三方 API 调用应走后端，不要把 Key 写入前端。
-- AIGC 商品建议不是实时交易信息。
-- 高德 POI 不提供完整菜单，菜品建议是健康选择原则，不代表餐厅真实菜单。
-- LifeRec 只提供一般生活方式建议，不提供医疗诊断、治疗建议或处方建议。

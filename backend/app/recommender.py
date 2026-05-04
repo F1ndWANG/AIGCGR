@@ -7,18 +7,26 @@ from dataclasses import dataclass
 from typing import Any
 
 from .aigc import build_life_brief
+from .aigc_verifier import apply_realness_checks
 from .config import settings
 from .data_loader import load_dataset
+from .execution import apply_execution_scores
 from .geo import haversine_km
-from .models import NearbyPlace, RecommendationItem, RecommendationResponse, RouteResponse, ScoreBreakdown, WeatherResponse
+from .life_state import encode_life_state
+from .models import NearbyPlace, RecommendationItem, RecommendationResponse, RecommendationTrace, RouteResponse, ScoreBreakdown, WeatherResponse
+from .plan_ranker import apply_plan_aware_ranking
 from .product_providers import get_product_provider
 from .providers import get_place_provider
 from .storage import (
     feedback_summary,
+    meal_history,
+    plan_items,
     recent_meal_tags as load_recent_meal_tags,
     recent_wellness_tags as load_recent_wellness_tags,
+    recommendation_history,
     save_recommendation_event,
     user_preferences,
+    wellness_history,
 )
 
 
@@ -105,19 +113,32 @@ def recommend(
     health_tags = analyze_health_state(user)
     weather_context = _load_weather_context(intent)
     feedback_profile = feedback_summary(user_id)
+    runtime_plans = plan_items(user_id=user_id, status=None, limit=60)
 
     if intent.scenario == "travel":
         items = _recommend_travel(dataset, user, intent)
-        plan = _build_travel_plan(items, intent, weather_context)
     elif intent.scenario == "shopping":
         items = _recommend_products(dataset, user, intent, health_tags)
-        plan = _build_shopping_plan(items, weather_context)
     else:
         items = _recommend_restaurants(dataset, user, intent, health_tags)
-        plan = _build_food_plan(items, health_tags, weather_context)
 
     items = _apply_feedback_profile(items, feedback_profile)
     items = _exclude_items(items, exclude_item_ids or [], exclude_item_names or [])
+    items = apply_execution_scores(
+        items,
+        scenario=intent.scenario,
+        radius_km=intent.radius_km,
+        budget=intent.budget,
+        weather_context=weather_context,
+    )
+    items = apply_plan_aware_ranking(items, runtime_plans)
+    items = apply_realness_checks(items, strict_real_data=settings.strict_real_data)
+    if intent.scenario == "travel":
+        plan = _build_travel_plan(items, intent, weather_context)
+    elif intent.scenario == "shopping":
+        plan = _build_shopping_plan(items, weather_context)
+    else:
+        plan = _build_food_plan(items, health_tags, weather_context)
     health_summary = _health_summary(health_tags)
     strategy = _strategy_summary(intent.scenario, health_tags)
     aigc_summary, _ = build_life_brief(message, intent.scenario, health_tags)
@@ -129,6 +150,17 @@ def recommend(
     context["recent_wellness_tag_count"] = len(effective_recent_wellness_tags)
     context["preferences_source"] = "runtime-storage" if preferences.get("updated_at") else "request-or-default"
     context["stored_preference_count"] = _stored_preference_count(preferences)
+    life_state = encode_life_state(
+        user_id=user_id,
+        meals=meal_history(user_id=user_id, limit=20),
+        wellness=wellness_history(user_id=user_id, limit=20),
+        preferences=preferences,
+        feedback=feedback_profile,
+        plans=[plan for plan in runtime_plans if plan.get("status") == "active"],
+        recommendations=recommendation_history(user_id=user_id, limit=20),
+        recent_meal_tags=effective_recent_meal_tags,
+        recent_wellness_tags=effective_recent_wellness_tags,
+    )
     response = RecommendationResponse(
         request_id=request_id,
         scenario=intent.scenario,
@@ -136,6 +168,7 @@ def recommend(
         health_summary=health_summary,
         strategy=strategy,
         context=context,
+        life_state=life_state,
         aigc_summary=aigc_summary,
         recommendations=items[:5],
         plan=plan,
@@ -523,6 +556,14 @@ def _weighted_score(preference: float, health: float, budget: float, distance: f
 
 
 def _item(id: str, name: str, item_type: str, score: float, tags: list[str], reasons: list[str], breakdown: tuple[float, float, float, float, float], suggested_items: list[str] | None = None, meta: dict[str, Any] | None = None) -> RecommendationItem:
+    normalized_meta = meta or {}
+    score_breakdown = ScoreBreakdown(
+        preference=round(breakdown[0], 2),
+        health=round(breakdown[1], 2),
+        budget=round(breakdown[2], 2),
+        distance=round(breakdown[3], 2),
+        context=round(breakdown[4], 2),
+    )
     return RecommendationItem(
         id=id,
         name=name,
@@ -531,15 +572,78 @@ def _item(id: str, name: str, item_type: str, score: float, tags: list[str], rea
         tags=tags,
         reasons=reasons,
         suggested_items=suggested_items or [],
-        meta=meta or {},
-        score_breakdown=ScoreBreakdown(
-            preference=round(breakdown[0], 2),
-            health=round(breakdown[1], 2),
-            budget=round(breakdown[2], 2),
-            distance=round(breakdown[3], 2),
-            context=round(breakdown[4], 2),
-        ),
+        meta=normalized_meta,
+        score_breakdown=score_breakdown,
+        trace=_build_recommendation_trace(score_breakdown, normalized_meta, tags),
     )
+
+
+def _build_recommendation_trace(breakdown: ScoreBreakdown, meta: dict[str, Any], tags: list[str]) -> RecommendationTrace:
+    data_sources = _trace_data_sources(meta)
+    penalties = _trace_penalties(breakdown, meta)
+    evidence = [
+        f"preference={breakdown.preference}",
+        f"health={breakdown.health}",
+        f"budget={breakdown.budget}",
+        f"distance={breakdown.distance}",
+        f"context={breakdown.context}",
+    ]
+    if tags:
+        evidence.append(f"tags={', '.join(tags[:5])}")
+    if meta.get("feedback_adjustment"):
+        evidence.append(f"feedback_adjustment={meta['feedback_adjustment']}")
+    confidence = _trace_confidence(breakdown, data_sources, penalties)
+    return RecommendationTrace(
+        data_sources=data_sources,
+        evidence=evidence,
+        penalties=penalties,
+        confidence=confidence,
+    )
+
+
+def _trace_data_sources(meta: dict[str, Any]) -> list[str]:
+    sources: list[str] = []
+    source = str(meta.get("source") or meta.get("provider") or "")
+    data_type = str(meta.get("data_type") or "")
+    route_source = str(meta.get("route_source") or "")
+    if source == "amap" or data_type == "real-poi":
+        sources.append("amap.poi")
+    elif source == "aigc" or data_type == "aigc-product-need":
+        sources.append("aigc.product_need")
+    elif "sample" in source or "sample" in data_type:
+        sources.append("sample.dev_data")
+    elif source:
+        sources.append(source)
+    if route_source == "amap":
+        sources.append("amap.walking_route")
+    if meta.get("feedback_adjustment"):
+        sources.append("runtime.feedback")
+    return _dedupe(sources or ["ranker.local_context"])
+
+
+def _trace_penalties(breakdown: ScoreBreakdown, meta: dict[str, Any]) -> list[str]:
+    penalties: list[str] = []
+    if breakdown.health < 0.45:
+        penalties.append("health_constraint_low")
+    if breakdown.budget < 0.45:
+        penalties.append("budget_fit_low")
+    if breakdown.distance < 0.35:
+        penalties.append("distance_cost_high")
+    if breakdown.preference < 0.4:
+        penalties.append("preference_match_low")
+    if str(meta.get("data_type") or "").startswith("sample") or str(meta.get("source") or "").startswith("sample"):
+        penalties.append("not_real_provider_data")
+    return penalties
+
+
+def _trace_confidence(breakdown: ScoreBreakdown, data_sources: list[str], penalties: list[str]) -> float:
+    base = (breakdown.preference + breakdown.health + breakdown.budget + breakdown.distance + breakdown.context) / 5
+    if any(source.startswith("amap") for source in data_sources):
+        base += 0.12
+    if any(source.startswith("aigc") for source in data_sources):
+        base += 0.04
+    base -= 0.06 * len(penalties)
+    return round(_clamp(base), 2)
 
 
 def _build_reasons(name: str, tags: set[str], health_tags: list[str], budget: float, distance: float) -> list[str]:
@@ -748,6 +852,7 @@ def _apply_feedback_profile(items: list[RecommendationItem], profile: dict[str, 
             item.score = round(_clamp_score(item.score + delta), 1)
             item.meta["feedback_adjustment"] = round(delta, 1)
             item.reasons.append("已参考你之前的喜欢/不喜欢/加入计划反馈进行重排。")
+            item.trace = _build_recommendation_trace(item.score_breakdown, item.meta, item.tags)
         adjusted.append(item)
     return sorted(adjusted, key=lambda candidate: candidate.score, reverse=True)
 

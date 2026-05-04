@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.evaluation import evaluate_recommendation
-from app.models import RecommendationItem, RecommendationRequest, RecommendationResponse, ScoreBreakdown
+from app.models import ExecutionScore, RealnessCheck, RecommendationItem, RecommendationRequest, RecommendationResponse, ScoreBreakdown
 
 
 def test_evaluation_passes_real_provider_result() -> None:
@@ -63,6 +63,49 @@ def test_evaluation_catches_strict_real_data_violation() -> None:
     assert report["issues"][0]["rule"] == "strict_real_data_violation"
 
 
+def test_evaluation_reports_low_executable_score() -> None:
+    request = RecommendationRequest(message="推荐附近餐厅", scenario="restaurant")
+    response = _response([
+        _item(
+            item_id="hard-1",
+            name="难执行餐厅",
+            tags=[],
+            meta={"source": "amap", "data_type": "real-poi", "distance_km": 1.5},
+            execution=ExecutionScore(executable_score=0.22, execution_cost=0.78, blockers=["time_high"]),
+        )
+    ])
+
+    report = evaluate_recommendation(request, response)
+    assert report["passed"] is True
+    assert report["average_executable_score"] == 0.22
+    assert report["issues"][0]["rule"] == "low_executable_score"
+
+
+def test_evaluation_reports_forbidden_aigc_claim() -> None:
+    request = RecommendationRequest(message="推荐商品", scenario="shopping")
+    response = _response([
+        _item(
+            item_id="aigc-risk",
+            name="风险商品",
+            tags=[],
+            meta={"source": "aigc", "data_type": "aigc-product-need"},
+            realness=RealnessCheck(
+                label="aigc_product_need",
+                realness_score=0.2,
+                hallucination_risk=0.9,
+                passed=False,
+                forbidden_claims=["purchase_link"],
+                risk_flags=["forbidden_claim_detected"],
+            ),
+        )
+    ])
+
+    report = evaluate_recommendation(request, response)
+    assert report["passed"] is False
+    assert report["average_realness_score"] == 0.2
+    assert report["issues"][0]["rule"] == "aigc_forbidden_claim"
+
+
 def _response(items: list[RecommendationItem]) -> RecommendationResponse:
     return RecommendationResponse(
         request_id="req-test",
@@ -78,7 +121,14 @@ def _response(items: list[RecommendationItem]) -> RecommendationResponse:
     )
 
 
-def _item(item_id: str, name: str, tags: list[str], meta: dict[str, str | float | int]) -> RecommendationItem:
+def _item(
+    item_id: str,
+    name: str,
+    tags: list[str],
+    meta: dict[str, str | float | int],
+    execution: ExecutionScore | None = None,
+    realness: RealnessCheck | None = None,
+) -> RecommendationItem:
     return RecommendationItem(
         id=item_id,
         name=name,
@@ -88,4 +138,6 @@ def _item(item_id: str, name: str, tags: list[str], meta: dict[str, str | float 
         reasons=["测试"],
         meta=meta,
         score_breakdown=ScoreBreakdown(preference=0.5, health=0.5, budget=0.5, distance=0.5, context=0.5),
+        execution=execution or ExecutionScore(executable_score=0.72, execution_cost=0.28),
+        realness=realness or RealnessCheck(label="provider_grounded", realness_score=0.9, hallucination_risk=0.1),
     )

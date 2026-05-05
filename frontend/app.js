@@ -5,6 +5,12 @@ const state = {
   scenario: "auto",
   latitude: null,
   longitude: null,
+  locationLabel: null,
+  locationLandmarks: null,
+  map: null,
+  mapMarker: null,
+  mapCircle: null,
+  mapRadiusTooltip: null,
   requestId: null,
   preferences: null,
   userId: localStorage.getItem("liferec:userId") || "u001",
@@ -16,6 +22,8 @@ const switchUserBtn = document.querySelector("#switchUserBtn");
 const input = document.querySelector("#messageInput");
 const submitBtn = document.querySelector("#submitBtn");
 const locateBtn = document.querySelector("#locateBtn");
+const customLocationInput = document.querySelector("#customLocationInput");
+const useCustomLocationBtn = document.querySelector("#useCustomLocationBtn");
 const refreshBtn = document.querySelector("#refreshBtn");
 const radiusInput = document.querySelector("#radiusInput");
 const recentMealTagsInput = document.querySelector("#recentMealTagsInput");
@@ -39,6 +47,11 @@ const profileHealthGoalsInput = document.querySelector("#profileHealthGoalsInput
 const profileTravelStyleInput = document.querySelector("#profileTravelStyleInput");
 const savePreferencesBtn = document.querySelector("#savePreferencesBtn");
 const locationStatus = document.querySelector("#locationStatus");
+const currentLocationMap = document.querySelector("#currentLocationMap");
+const mapPlaceName = document.querySelector("#mapPlaceName");
+const mapCoordinateText = document.querySelector("#mapCoordinateText");
+const mapViewport = document.querySelector("#mapViewport");
+const mapFallback = document.querySelector("#mapFallback");
 const statusPanel = document.querySelector("#statusPanel");
 const intentSummary = document.querySelector("#intentSummary");
 const healthSummary = document.querySelector("#healthSummary");
@@ -97,6 +110,22 @@ userIdInput.addEventListener("keydown", async (event) => {
   }
 });
 
+useCustomLocationBtn.addEventListener("click", async () => {
+  await useCustomLocation();
+});
+
+customLocationInput.addEventListener("keydown", async (event) => {
+  if (event.key === "Enter") {
+    await useCustomLocation();
+  }
+});
+
+radiusInput.addEventListener("input", () => {
+  if (state.latitude !== null && state.longitude !== null) {
+    updateCurrentLocationMap(state.latitude, state.longitude);
+  }
+});
+
 locateBtn.addEventListener("click", () => {
   if (!navigator.geolocation) {
     locationStatus.textContent = "当前浏览器不支持定位。";
@@ -108,7 +137,10 @@ locateBtn.addEventListener("click", () => {
     (position) => {
       state.latitude = position.coords.latitude;
       state.longitude = position.coords.longitude;
+      state.locationLabel = getNearbyPlaceLabel(state.latitude, state.longitude);
+      state.locationLandmarks = null;
       locationStatus.textContent = `已启用动态位置：${state.latitude.toFixed(4)}, ${state.longitude.toFixed(4)}`;
+      updateCurrentLocationMap(state.latitude, state.longitude);
     },
     () => {
       locationStatus.textContent = "定位未启用，继续使用示例地点。";
@@ -120,6 +152,222 @@ locateBtn.addEventListener("click", () => {
     },
   );
 });
+
+async function useCustomLocation() {
+  const query = customLocationInput.value.trim();
+  if (!query) {
+    locationStatus.textContent = "请输入自定义位置，例如：北京海淀北京理工大学。";
+    return;
+  }
+
+  useCustomLocationBtn.disabled = true;
+  locationStatus.textContent = `正在识别位置：${query}...`;
+
+  try {
+    const location = await resolveLocation(query);
+    state.latitude = location.latitude;
+    state.longitude = location.longitude;
+    state.locationLabel = location.label;
+    state.locationLandmarks = location.landmarks || null;
+    defaultLocationInput.value = location.label;
+    locationStatus.textContent = `已启用自定义位置：${state.latitude.toFixed(4)}, ${state.longitude.toFixed(4)}`;
+    updateCurrentLocationMap(state.latitude, state.longitude);
+  } catch (error) {
+    locationStatus.textContent = "暂时无法识别该位置，请换成更完整的地址或学校/商圈名称。";
+    console.error(error);
+  } finally {
+    useCustomLocationBtn.disabled = false;
+  }
+}
+
+async function resolveLocation(query) {
+  const knownLocation = findKnownLocation(query);
+  if (knownLocation) {
+    return knownLocation;
+  }
+
+  const endpoint = new URL("https://nominatim.openstreetmap.org/search");
+  endpoint.searchParams.set("format", "jsonv2");
+  endpoint.searchParams.set("limit", "1");
+  endpoint.searchParams.set("accept-language", "zh-CN");
+  endpoint.searchParams.set("q", query);
+
+  const response = await fetch(endpoint.toString());
+  if (!response.ok) {
+    throw new Error(`Geocoding returned ${response.status}`);
+  }
+  const results = await response.json();
+  if (!results.length) {
+    throw new Error("No geocoding result");
+  }
+
+  return {
+    latitude: Number(results[0].lat),
+    longitude: Number(results[0].lon),
+    label: results[0].display_name || query,
+    landmarks: [query, "自定义位置", "附近生活圈"],
+  };
+}
+
+function findKnownLocation(query) {
+  const normalized = query.replace(/\s+/g, "");
+  const knownLocations = [
+    {
+      keywords: ["北京理工大学", "北京海淀北京理工大学", "北理工", "bit"],
+      latitude: 39.9608,
+      longitude: 116.3162,
+      label: "北京市海淀区北京理工大学附近",
+      landmarks: ["北京理工大学", "中关村南大街", "海淀生活圈"],
+    },
+    {
+      keywords: ["西北大学图书馆", "西北大学长安校区", "西安长安西北大学"],
+      latitude: 34.1455,
+      longitude: 108.8695,
+      label: "陕西省西安市长安区西北大学图书馆附近",
+      landmarks: ["西北大学图书馆", "长安校区", "校园绿地"],
+    },
+  ];
+
+  return knownLocations.find((location) =>
+    location.keywords.some((keyword) => normalized.toLowerCase().includes(keyword.toLowerCase())),
+  );
+}
+
+function updateCurrentLocationMap(latitude, longitude) {
+  if (!currentLocationMap || !mapPlaceName || !mapCoordinateText) {
+    return;
+  }
+
+  const radius = Number(radiusInput.value || 3);
+  const label = state.locationLabel || getNearbyPlaceLabel(latitude, longitude);
+  mapPlaceName.textContent = label;
+  mapCoordinateText.textContent = `当前位置：${latitude.toFixed(4)}, ${longitude.toFixed(4)} · 推荐半径 ${radius} km`;
+  renderInteractiveMap(latitude, longitude, radius, label);
+  currentLocationMap.classList.remove("is-empty");
+}
+
+function renderInteractiveMap(latitude, longitude, radiusKm, label) {
+  if (!mapViewport || !window.L) {
+    if (mapFallback) {
+      const fallbackTitle = mapFallback.querySelector("strong");
+      const fallbackText = mapFallback.querySelector("span");
+      if (fallbackTitle) fallbackTitle.textContent = "在线地图暂不可用";
+      if (fallbackText) fallbackText.textContent = "请检查网络后刷新页面，位置坐标仍会用于推荐。";
+    }
+    return;
+  }
+
+  const center = [latitude, longitude];
+  if (!state.map) {
+    state.map = L.map(mapViewport, {
+      center,
+      zoom: 15,
+      zoomControl: true,
+      scrollWheelZoom: true,
+      attributionControl: true,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      crossOrigin: true,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(state.map);
+    if (mapFallback) {
+      mapFallback.setAttribute("aria-hidden", "true");
+      mapFallback.style.display = "none";
+    }
+  }
+
+  if (!state.mapMarker) {
+    const pinIcon = L.divIcon({
+      className: "",
+      html: '<span class="liferec-map-pin" aria-hidden="true"></span>',
+      iconSize: [34, 34],
+      iconAnchor: [17, 31],
+    });
+    state.mapMarker = L.marker(center, {
+      draggable: true,
+      icon: pinIcon,
+      title: "拖动调整位置",
+    })
+      .addTo(state.map)
+      .bindTooltip("你在这里", {
+        permanent: true,
+        direction: "right",
+        offset: [16, -12],
+        className: "liferec-map-tooltip",
+      });
+    state.mapMarker.on("dragend", () => {
+      const next = state.mapMarker.getLatLng();
+      state.latitude = next.lat;
+      state.longitude = next.lng;
+      state.locationLabel = "已微调的位置";
+      state.locationLandmarks = null;
+      locationStatus.textContent = `已微调位置：${next.lat.toFixed(4)}, ${next.lng.toFixed(4)}`;
+      updateCurrentLocationMap(next.lat, next.lng);
+    });
+  }
+
+  state.map.setView(center, state.map.getZoom() || 15, { animate: true });
+  state.mapMarker.setLatLng(center);
+  state.mapMarker.setTooltipContent(label === "已微调的位置" ? "已微调" : "你在这里");
+
+  const radiusMeters = Math.max(1, radiusKm) * 1000;
+  if (!state.mapCircle) {
+    state.mapCircle = L.circle(center, {
+      radius: radiusMeters,
+      color: "#0c7c67",
+      weight: 2,
+      dashArray: "8 7",
+      fillColor: "#0c7c67",
+      fillOpacity: 0.08,
+      interactive: false,
+    }).addTo(state.map);
+  } else {
+    state.mapCircle.setLatLng(center);
+    state.mapCircle.setRadius(radiusMeters);
+  }
+
+  if (!state.mapRadiusTooltip) {
+    state.mapRadiusTooltip = L.tooltip({
+      permanent: true,
+      direction: "top",
+      offset: [0, -8],
+      className: "liferec-radius-label",
+    }).addTo(state.map);
+  }
+  state.mapRadiusTooltip.setLatLng(getRadiusLabelPosition(latitude, longitude, radiusKm));
+  state.mapRadiusTooltip.setContent(`${radiusKm} km`);
+
+  setTimeout(() => state.map.invalidateSize(), 0);
+}
+
+function getRadiusLabelPosition(latitude, longitude, radiusKm) {
+  const latitudeOffset = (radiusKm / 111) * 0.62;
+  const longitudeOffset = (radiusKm / (111 * Math.max(Math.cos((latitude * Math.PI) / 180), 0.2))) * 0.52;
+  return [latitude + latitudeOffset, longitude + longitudeOffset];
+}
+
+function getMapLandmarks(latitude, longitude, label) {
+  const matched = findKnownLocation(label || "");
+  if (matched?.landmarks) {
+    return matched.landmarks;
+  }
+  const isNorthwestUniversityArea =
+    Math.abs(latitude - 34.1455) < 0.08 && Math.abs(longitude - 108.8695) < 0.08;
+  if (isNorthwestUniversityArea) {
+    return ["西北大学图书馆", "长安校区", "校园绿地"];
+  }
+  return ["目标位置", "附近街区", "生活服务点"];
+}
+
+function getNearbyPlaceLabel(latitude, longitude) {
+  const isNorthwestUniversityArea =
+    Math.abs(latitude - 34.1455) < 0.08 && Math.abs(longitude - 108.8695) < 0.08;
+  if (isNorthwestUniversityArea) {
+    return "陕西省西安市长安区西北大学图书馆附近";
+  }
+  return "当前位置附近";
+}
 
 async function requestRecommendation() {
   const message = input.value.trim();
@@ -145,7 +393,7 @@ async function requestRecommendation() {
         longitude: state.longitude,
         radius_km: Number(radiusInput.value || 3),
         recent_meal_tags: parseList(recentMealTagsInput.value),
-        location: defaultLocationInput.value.trim() || null,
+        location: state.locationLabel || customLocationInput.value.trim() || defaultLocationInput.value.trim() || null,
         budget: defaultBudgetInput.value ? Number(defaultBudgetInput.value) : null,
         taste: mergeLists(parseList(tasteInput.value), parseList(profileTasteInput.value)),
         avoid: mergeLists(parseList(avoidInput.value), parseList(profileAvoidInput.value)),
@@ -421,13 +669,13 @@ function renderUserContext(data) {
 
   memorySummary.innerHTML = `
     <div class="memory-stats">
-      <strong>${data.meals?.length || 0}</strong><small>饮食记录</small>
-      <strong>${data.wellness?.length || 0}</strong><small>生活状态</small>
-      <strong>${positiveEvents}</strong><small>正反馈</small>
+      <div class="memory-stat"><strong>${data.meals?.length || 0}</strong><small>饮食记录</small></div>
+      <div class="memory-stat"><strong>${data.wellness?.length || 0}</strong><small>生活状态</small></div>
+      <div class="memory-stat"><strong>${positiveEvents}</strong><small>正反馈</small></div>
     </div>
     <div class="memory-stats">
-      <strong>${negativeEvents}</strong><small>负反馈</small>
-      <strong>${preferenceCount}</strong><small>长期偏好</small>
+      <div class="memory-stat"><strong>${negativeEvents}</strong><small>负反馈</small></div>
+      <div class="memory-stat"><strong>${preferenceCount}</strong><small>长期偏好</small></div>
     </div>
     <div class="profile-tags">${mealTags}</div>
     <div class="profile-tags wellness-tags">${wellnessTags}</div>

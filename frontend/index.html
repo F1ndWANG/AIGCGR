@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
@@ -134,9 +135,13 @@
 
     <section class="workspace">
       <header class="topbar">
-        <div>
+        <div class="hero-title">
           <p class="eyebrow">Generative Life Recommender</p>
-          <h1>把“我该怎么安排生活”变成可执行推荐</h1>
+          <h1 aria-label="附近好选择，交给 LifeRec 安排">
+            <span class="title-line">附近好选择</span>
+            <span class="title-line title-accent">交给 LifeRec 安排</span>
+          </h1>
+          <p class="hero-copy">结合当前位置、推荐半径和你的长期偏好，生成能立刻出发的餐饮、购物与旅行建议。</p>
         </div>
         <a class="doc-link" href="https://github.com/F1ndWANG/AIGCGR/blob/main/docs/architecture.md" target="_blank" rel="noreferrer">架构文档</a>
       </header>
@@ -145,12 +150,32 @@
         <textarea id="messageInput" rows="4">我今天不想吃饭，最近吃得有点油腻，学校附近有什么健康一点的？</textarea>
         <div class="location-bar">
           <button id="locateBtn" class="secondary-action">使用当前位置</button>
+          <label class="custom-location-field">
+            <span class="custom-location-label">自定义位置</span>
+            <input id="customLocationInput" type="text" placeholder="例如：北京海淀北京理工大学">
+          </label>
+          <button id="useCustomLocationBtn" class="secondary-action">识别位置</button>
           <label>
             推荐半径
             <input id="radiusInput" type="number" min="1" max="50" step="1" value="3">
             km
           </label>
           <span id="locationStatus">未启用动态位置；餐厅/景点真实推荐需要当前位置或城市信息。</span>
+        </div>
+        <div id="currentLocationMap" class="current-location-map is-empty" aria-label="当前位置地图">
+          <div class="map-card-copy">
+            <p class="eyebrow">Current Location</p>
+            <strong id="mapPlaceName">点击“使用当前位置”后显示地图</strong>
+            <span id="mapCoordinateText">地图会根据浏览器定位自动更新。</span>
+          </div>
+          <div class="map-stage">
+            <div id="mapViewport" class="map-viewport" role="application" aria-label="可拖拽缩放的在线地图"></div>
+            <div id="mapFallback" class="map-fallback">
+              <strong>在线地图加载中</strong>
+              <span>加载完成后可拖拽、缩放并微调定位点。</span>
+            </div>
+            <span class="map-provider-badge">OpenStreetMap</span>
+          </div>
         </div>
         <div class="context-grid" aria-label="用户实时状态">
           <label>
@@ -251,6 +276,7 @@
     </section>
   </main>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

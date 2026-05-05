@@ -1,214 +1,196 @@
-# LifeRec: AIGC + 生成式推荐生活推荐系统
+# LifeRec: AIGC + 生成式推荐的 AI 生活推荐系统
 
-LifeRec 是一个开源 AI 生活推荐系统原型，目标是把“我今天该吃什么、买什么、去哪儿、怎么安排”这类自然语言需求，转化为可执行、可解释、可持续学习的个性化生活方案。
+LifeRec 是一个面向真实生活场景的开源 AI 推荐系统原型。它的目标不是做一个静态 Demo，而是把用户的自然语言需求、当前位置、饮食记录、生活状态、长期偏好、历史反馈和真实生活服务数据结合起来，生成可以直接执行的生活建议。
 
-项目结合 AIGC、生成式推荐、动态位置、真实生活服务 API、运行时用户记忆、计划反馈学习和真实性防护，覆盖健康饮食、附近餐厅、AIGC 商品需求清单、旅行规划和每日生活简报等场景。
+这个项目关注的问题很具体：今天吃什么、附近去哪家餐厅、该买什么生活用品、周末怎么规划、当前状态下如何安排更健康的一天。LifeRec 通过 AIGC 负责理解、解释和生成方案，通过生成式推荐算法负责排序、约束、重排和持续学习。
 
-当前定位：`v0.2` 可运行 MVP。它不是静态 Demo，而是具备真实 Provider、SQLite 运行时数据、算法追踪、Life State Vector、可执行性重排、计划感知排序、AIGC 真实性防护和自动化测试的完整实验项目。
+## 项目定位
 
-## 需求分析
+LifeRec 可以理解为一个“AI 生活推荐中枢”。它融合了 AI 电商助手、附近生活服务、健康饮食建议、旅行规划和个人记忆系统，尝试把“我该怎么安排生活”这类开放问题转化为结构化、可解释、可反馈、可持续优化的推荐结果。
 
-明确用户需求：
+项目当前重点覆盖四类核心场景：
 
-- 用户希望用自然语言描述生活需求，例如“不想吃饭”“附近有什么健康餐厅”“帮我做购物清单”“周末去哪玩”。
-- 系统需要结合当前位置、预算、饮食记录、生活状态、长期偏好、反馈、计划和真实 Provider 数据生成推荐。
-- 推荐结果不能只是聊天文本，还要能转化为行动计划、路线、商品需求、餐厅选择和后续反馈。
-- AIGC 可以生成解释和商品需求，但不能虚构真实餐厅、菜单、SKU、库存、折扣、购买链接或实时价格。
+- 健康饮食推荐：根据近期饮食、口味、忌口、预算、生活状态和健康目标生成饮食建议。
+- 附近餐厅推荐：结合当前位置、半径、预算、天气、路线和用户偏好推荐可到达的餐厅。
+- AIGC 商品需求生成：不依赖淘宝、京东、拼多多等交易平台，而是根据生活需求生成合理的商品需求清单。
+- 旅行与日程规划：根据目的地、时间、预算、兴趣和天气生成生活化的出行计划。
 
-可行性研究：
+## 核心功能
 
-- 地点、天气、路线使用高德 Web 服务 API，保证外部生活服务数据可追溯。
-- 商品部分不依赖淘宝、京东、拼多多，采用 AIGC 生成“商品需求清单”，并明确不代表真实交易信息。
-- 用户记忆使用 SQLite 保存，适合本地运行、实验迭代和后续迁移到 PostgreSQL。
-- 推荐算法采用可逐步扩展的模块化设计，便于后续做论文、实验和开源演进。
+### 1. 自然语言生活需求理解
 
-需求规格说明：
+用户可以用自然语言描述需求，例如：
 
-- 必须支持饮食、餐厅、购物、旅行四类核心场景。
-- 必须支持多用户 `user_id` 隔离。
-- 必须支持真实运行时记忆：饮食、生活状态、偏好、反馈、计划、推荐历史。
-- 必须返回可解释结果：评分、证据链、数据来源、扣分项、执行成本和真实性风险。
-- 必须提供测试、安全扫描和 `.env` 密钥隔离。
+- “我今天不想吃饭，最近吃得有点油腻，学校附近有什么健康一点的？”
+- “帮我安排一个周末短途旅行，预算不要太高。”
+- “最近睡眠不好，帮我推荐今天的饮食和生活安排。”
+- “我想买一些适合办公室久坐人群的东西。”
 
-## 系统设计
+系统会识别场景、预算、位置、饮食约束、生活状态和行动目标，并把开放式输入转化为推荐请求。
 
-概要设计：
+### 2. 动态生活上下文建模
 
-```text
-Frontend
-  -> FastAPI Backend
-  -> Intent Parser
-  -> Runtime User Context
-  -> Life State Vector
-  -> Provider Layer: Amap + OpenAI-compatible LLM
-  -> Candidate Generation
-  -> Multi-objective Ranking
-  -> Execution / Plan / Realness Reranking
-  -> Recommendation Cards + Plan + Feedback
-```
+LifeRec 不只看本次输入，还会聚合用户的长期和短期上下文：
 
-模块划分：
+- 近期饮食记录
+- 睡眠、压力、运动等生活状态
+- 长期口味、忌口、过敏、预算和旅行偏好
+- 历史推荐记录
+- 用户正反馈和负反馈
+- 已加入计划、已完成计划和已取消计划
 
-| 模块 | 说明 |
-|---|---|
-| `backend/app/main.py` | FastAPI 路由入口 |
-| `backend/app/recommender.py` | 推荐主链路、意图识别、候选生成和排序 |
-| `backend/app/life_state.py` | Life State Vector 用户状态编码 |
-| `backend/app/execution.py` | ExecutionCostScorer，可执行性评分 |
-| `backend/app/plan_ranker.py` | PlanAwareRanker，计划感知排序 |
-| `backend/app/aigc_verifier.py` | AIGCVerifier，真实性与幻觉风险校验 |
-| `backend/app/product_providers.py` | AIGC 商品需求生成与本地 fallback |
-| `backend/app/providers.py` | 高德地点、天气、路线 Provider |
-| `backend/app/storage.py` | SQLite 运行时记忆和缓存 |
-| `frontend/` | 原生 HTML/CSS/JavaScript Web MVP |
-| `tests/` | pytest 自动化测试 |
+这些信息会被编码为 Life State Vector，用来判断当前用户更需要健康修正、低成本方案、轻量执行方案，还是探索新选择。
 
-详细设计：
+### 3. 真实地点与生活服务推荐
 
-- `RecommendationTrace`：记录 ranker、评分公式、数据源、证据、扣分项和置信度。
-- `LifeStateSnapshot`：把饮食、生活状态、偏好、反馈、计划、推荐历史编码为动态用户状态。
-- `ExecutionScore`：融合距离、预算、路线时间、天气、复杂度和数据风险，计算可执行性。
-- `PlanSignal`：用 active/done/canceled 计划做重复抑制、完成偏好增强和取消偏好惩罚。
-- `RealnessCheck`：区分 `provider_grounded`、`aigc_product_need`、`development_sample`，检测购买链接、SKU、库存、折扣、实时价格等禁止声明。
-- `ScoreBreakdown`：包含 preference、health、budget、distance、context、execution、realness 等分项。
+餐厅、地点、天气和路线等信息优先来自真实 Provider，而不是由模型凭空编造。系统会把地点数据、距离、路线时间、天气因素和预算约束纳入排序，使推荐结果更接近日常生活中的真实决策。
 
-## 编码实现
+对于餐厅场景，系统可以给出：
 
-后端实现：
+- 推荐理由
+- 距离和路线参考
+- 健康选择建议
+- 预算适配判断
+- 与用户近期饮食的关系
+- 推荐结果的证据链和数据来源
 
-- 使用 Python + FastAPI + Pydantic 构建 API。
-- 使用 SQLite 保存运行时用户数据，默认路径为 `runtime/liferec.sqlite3`。
-- 使用高德 Web 服务 API 获取 POI、逆地理编码、天气和步行路线。
-- 使用 OpenAI-compatible LLM，默认模型配置为 `deepseek-v4-flash`。
-- 使用 AIGC 商品需求生成，不声称真实 SKU、库存、折扣或购买链接。
+### 4. AIGC 商品需求生成
 
-前端实现：
+商品模块采用 AIGC 生成“商品需求清单”，而不是伪造真实 SKU、库存、折扣或购买链接。它更适合用于生活购物规划、需求拆解和电商助手原型，例如：
 
-- 原生 HTML/CSS/JavaScript，无复杂构建链。
-- 支持 API Base URL 切换、用户 ID 切换、当前位置获取。
-- 支持饮食记录、生活状态记录、长期偏好保存、计划管理、推荐历史、每日简报和用户记忆导出。
-- 推荐卡片展示算法追踪、可执行性评分、计划感知信号和真实性风险。
+- 健康饮食准备清单
+- 办公室久坐改善物品
+- 旅行出行装备
+- 睡眠改善用品
+- 低预算生活补给
 
-主要 API：
+系统会明确区分“真实生活服务数据”和“AIGC 生成建议”，避免把生成内容伪装成真实交易信息。
 
-| API | 用途 |
-|---|---|
-| `GET /api/health` | 健康检查和存储状态 |
-| `GET /api/providers/capabilities` | 查看高德、AIGC、商品、缓存 Provider 状态 |
-| `POST /api/recommend` | 统一生活推荐入口 |
-| `POST /api/recommend/refresh` | 基于 `request_id` 换一批 |
-| `GET /api/user/life-state` | 动态生活状态向量 |
-| `GET /api/user/context` | 聚合用户上下文 |
-| `GET /api/user/export` | 导出完整用户记忆 JSON |
-| `GET /api/user/daily-brief` | 生成 AIGC 今日生活简报 |
-| `POST /api/user/meals` / `GET /api/user/meals` | 饮食记录写入和查询 |
-| `POST /api/user/wellness` / `GET /api/user/wellness` | 生活状态写入和查询 |
-| `PUT /api/user/preferences` / `GET /api/user/preferences` | 长期偏好保存和查询 |
-| `POST /api/user/plans` / `PATCH /api/user/plans/{plan_id}` | 计划创建和状态更新 |
-| `GET /api/user/plans/export` / `GET /api/user/plans/export.ics` | 计划 JSON / ICS 导出 |
-| `POST /api/context/nearby` | 附近地点查询 |
-| `POST /api/context/places/search` | 城市或关键词地点搜索 |
-| `GET /api/context/weather` | 实时天气 |
-| `POST /api/context/route/walking` | 步行路线 |
-| `POST /api/context/products/search` | AIGC 商品需求清单 |
+### 5. 可执行推荐排序
 
-本地运行：
+LifeRec 的推荐不是只生成一段文本，而是会考虑用户是否真的能执行。ExecutionCostScorer 会把以下因素纳入评分：
 
-```powershell
-Copy-Item .env.example .env
-.\scripts\dev_backend.ps1
-.\scripts\dev_frontend.ps1
-```
+- 距离是否合适
+- 预算是否匹配
+- 路线时间是否可接受
+- 天气是否影响执行
+- 行动复杂度是否过高
+- 数据来源是否可靠
 
-推荐环境变量：
+最终推荐会优先展示更容易执行、更符合当前状态、更少冲突的结果。
 
-```env
-AMAP_API_KEY=你的高德Web服务Key
-LLM_API_KEY=你的DeepSeek或OpenAI-compatible Key
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-flash
-PRODUCT_PROVIDER=aigc
-STRICT_REAL_DATA=true
-PROVIDER_CACHE_TTL_SECONDS=300
-CORS_ALLOW_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
-```
+### 6. 计划感知推荐
 
-`.env` 已被 `.gitignore` 忽略，不应提交到 GitHub。
+系统支持把推荐结果加入计划，并持续利用计划状态优化后续推荐。PlanAwareRanker 会根据用户的 active、done、canceled 计划进行重排：
 
-## 软件测试
+- 避免反复推荐已经加入计划的内容
+- 对已完成计划中体现出的偏好进行增强
+- 对取消过的类型进行适度降权
+- 识别可能存在时间或内容冲突的推荐
 
-测试目标：
+这使 LifeRec 不只是一次性推荐工具，而是一个能随着用户行动持续调整的生活规划系统。
 
-- 发现并修复推荐链路、用户记忆、Provider 边界、AIGC 生成和前端交互中的错误。
-- 覆盖单元测试、集成测试、系统级接口测试和安全检查。
-- 确保严格真实数据模式下不会把本地样例伪装成真实推荐。
+### 7. AIGC 真实性防护
 
-测试命令：
+项目加入了 AIGCVerifier，用来约束生成式内容的边界。它会识别推荐结果属于真实 Provider 数据、AIGC 商品需求，还是开发样例数据，并检测潜在的幻觉风险。
 
-```powershell
-python -m pip install -r backend/requirements-dev.txt
-python -m pytest
-python -m compileall backend
-node --check frontend/app.js
-.\scripts\check_public_safety.ps1
-```
+重点防护内容包括：
 
-推荐评估脚本：
+- 不伪造真实购买链接
+- 不伪造 SKU、库存、折扣和实时价格
+- 不把样例数据包装成真实服务结果
+- 不把健康建议包装成医疗诊断
+- 不把餐厅建议包装成真实菜单承诺
 
-```powershell
-python scripts\evaluate_recommendations.py --request request.json --response response.json
-```
+这个模块是项目后续做可信生成式推荐的重要基础。
 
-当前测试覆盖：
+### 8. 用户记忆与反馈闭环
 
-- API 健康检查、CORS、Provider 能力。
-- 饮食、生活状态、偏好、反馈、计划、推荐历史和用户记忆导出。
-- Life State Vector 动态编码。
-- RecommendationTrace 证据链。
-- ExecutionCostScorer 可执行性评分。
-- PlanAwareRanker 计划感知排序。
-- AIGCVerifier 禁止声明检测和严格模式过滤。
-- 预算、距离、真实数据、健康冲突、低可执行性和幻觉风险评估。
-- 前端 JavaScript 语法检查。
-- 公开密钥扫描。
+LifeRec 支持运行时用户记忆，推荐结果、饮食记录、生活状态、偏好、计划和反馈都会沉淀为后续推荐的依据。
 
-## 运行维护
+当前反馈闭环包括：
 
-交付后维护重点：
+- 推荐历史追踪
+- 用户正负反馈记录
+- 饮食和生活状态记录
+- 长期偏好保存
+- 计划完成和取消反馈
+- 用户记忆导出
+- 每日生活简报生成
 
-- 纠错维护：修复 Provider 异常、AIGC 输出越界、推荐排序异常和前端交互问题。
-- 适应性维护：支持新的地图服务、LLM Provider、数据库和部署环境。
-- 完善性维护：继续扩展算法模块和产品功能。
-- 安全维护：持续避免提交 `.env`、API Key、运行时缓存和用户隐私数据。
+这让系统具备从“单次问答”走向“长期个性化生活助手”的基础。
 
-真实数据边界：
+## 算法层面的创新方向
 
-- 地点、天气、路线来自高德 Provider。
-- 商品建议是 AIGC 商品需求生成，不是实时交易信息。
-- 高德 POI 不提供完整菜单，菜品建议是健康选择原则，不代表餐厅真实菜单。
-- LifeRec 只提供一般生活方式建议，不提供医疗诊断、治疗建议或处方建议。
+LifeRec 当前已经实现了多个面向生成式推荐的算法模块：
 
-后续路线：
+- Life State Vector：把用户近期饮食、生活状态、偏好、反馈和计划编码为动态状态。
+- ExecutionCostScorer：把可执行性作为推荐排序目标，而不只看相关性。
+- PlanAwareRanker：根据用户计划状态做去重、加权、降权和冲突识别。
+- AIGCVerifier：为生成式推荐增加真实性约束和幻觉风险检测。
+- RecommendationTrace：为每条推荐保留评分、证据、来源、扣分项和置信度。
 
-- Phase 6：反馈权重学习，引入时间衰减和用户级标签权重。
-- Phase 7：Bandit 探索，平衡稳定偏好和新选项。
-- 数据库迁移：从 SQLite 迁移到 PostgreSQL。
-- 用户体系：增加认证、权限隔离和多用户部署能力。
-- Provider 扩展：增加驾车、公交、骑行、日历、运动、睡眠和菜单数据。
+这些模块使项目具备继续扩展到反馈权重学习、Bandit 探索、多目标优化、用户长期画像建模和可信 AIGC 推荐评估的空间。
+
+## 前端体验
+
+项目提供了一个轻量 Web 前端，用来展示完整推荐流程。前端不是简单表单，而是围绕真实生活决策组织界面：
+
+- 生活需求输入
+- 饮食、购物、旅行等场景切换
+- 当前位置使用
+- 用户画像和长期偏好
+- 饮食与生活状态记录
+- 推荐卡片展示
+- AIGC 推荐摘要
+- 执行成本和推荐证据
+- 计划加入、完成和取消
+- Life State Vector 展示
+- 用户记忆与每日简报
+
+前端重点体现“推荐为什么出现、是否能执行、数据从哪里来、下一步怎么做”。
+
+## 项目价值
+
+LifeRec 的价值在于把 AIGC 从“生成文本”推进到“生成可执行生活决策”。它不是单独的聊天机器人，也不是静态商品推荐页，而是一个可持续扩展的生成式推荐系统实验平台。
+
+它适合作为以下方向的开源基础：
+
+- AIGC + 推荐系统课程项目
+- 生成式推荐算法实验
+- AI 生活助手原型
+- AI 电商助手和生活服务推荐结合案例
+- 可信 AIGC 推荐系统研究
+- 多源真实数据驱动的个性化推荐系统
+
+## 当前能力边界
+
+LifeRec 会尽量使用真实 Provider 数据，但仍然明确保留边界：
+
+- 餐厅和地点信息来自生活服务 Provider，但菜品建议通常是健康选择原则，不代表餐厅真实菜单。
+- 商品模块生成的是需求清单，不代表真实商品、库存、价格或购买链接。
+- 健康相关内容只提供一般生活方式建议，不提供医疗诊断、治疗建议或处方建议。
+- 当前系统更适合原型验证、算法实验和开源演示，正式生产部署仍需要接入认证、权限、隐私保护和更完整的数据治理。
+
+## 后续路线
+
+项目后续可以继续围绕算法创新和真实产品能力扩展：
+
+- 引入反馈权重学习，让不同用户的反馈影响个性化排序。
+- 引入 Bandit 探索，在稳定偏好和新选择之间取得平衡。
+- 扩展路线能力，支持驾车、公交、骑行等更多出行方式。
+- 增加日历、运动、睡眠和菜单等生活数据源。
+- 增强多用户体系、权限隔离和长期部署能力。
+- 构建更系统的生成式推荐评估指标。
 
 ## 文档索引
 
-| 文档 | 内容 |
-|---|---|
-| [项目总览](docs/project-summary.md) | 当前架构、功能和边界 |
-| [架构设计](docs/architecture.md) | 系统模块和数据流 |
-| [动态 API 规划](docs/dynamic-api-plan.md) | 动态推荐和 Provider 方案 |
-| [API 清单与获取方式](docs/api-providers.md) | 所需 API 和申请方式 |
-| [API 设置指南](docs/api-setup-guide.md) | `.env` 配置和验证方法 |
-| [AIGC 模块设计](docs/aigc-integration.md) | LLM 调用和 Prompt 边界 |
-| [算法创新路线](docs/algorithm-innovation-roadmap.md) | Life State、可执行推荐、计划反馈和真实性防护 |
-| [真实数据策略](docs/real-data-policy.md) | 数据真实性和 fallback 规则 |
-| [反馈闭环](docs/feedback-loop.md) | 用户反馈、饮食记录和重排 |
-| [部署与运行](docs/deployment.md) | 本地和 Docker 运行 |
-| [测试与质量检查](docs/testing.md) | 自动化测试和评估 |
-| [Roadmap](docs/roadmap.md) | 后续方向 |
+- [项目总览](docs/project-summary.md)
+- [架构设计](docs/architecture.md)
+- [动态 API 规划](docs/dynamic-api-plan.md)
+- [AIGC 模块设计](docs/aigc-integration.md)
+- [算法创新路线](docs/algorithm-innovation-roadmap.md)
+- [真实数据策略](docs/real-data-policy.md)
+- [反馈闭环](docs/feedback-loop.md)
+- [测试与质量检查](docs/testing.md)
+- [Roadmap](docs/roadmap.md)

@@ -28,6 +28,17 @@
         <button class="scenario" data-scenario="travel">旅行规划</button>
       </nav>
 
+      <section class="profile-panel api-switcher">
+        <p class="eyebrow">API Endpoint</p>
+        <h2>后端服务地址</h2>
+        <label>
+          API Base URL
+          <input id="apiBaseInput" type="url" value="http://localhost:8000/api" autocomplete="off">
+        </label>
+        <button id="saveApiBaseBtn" class="secondary-action">保存 API 地址</button>
+        <small>部署到其他机器时只需切换这里，不需要改前端源码。</small>
+      </section>
+
       <section class="profile-panel user-switcher">
         <p class="eyebrow">User Scope</p>
         <h2>当前用户上下文</h2>
@@ -45,6 +56,32 @@
         <div id="memorySummary" class="memory-summary">
           <span>正在读取用户上下文...</span>
         </div>
+        <button id="exportMemoryBtn" class="secondary-action memory-export-action">导出完整记忆 JSON</button>
+      </section>
+
+      <section class="profile-panel">
+        <p class="eyebrow">Life State Vector</p>
+        <h2>动态生活状态编码</h2>
+        <div id="lifeStateSummary" class="life-state-summary">
+          <span>正在编码当前用户生活状态...</span>
+        </div>
+      </section>
+
+      <section class="profile-panel">
+        <p class="eyebrow">Recommendation Memory</p>
+        <h2>最近生成过的真实推荐</h2>
+        <div id="recommendationHistory" class="history-summary">
+          <span>正在读取推荐历史...</span>
+        </div>
+      </section>
+
+      <section class="profile-panel">
+        <p class="eyebrow">AIGC Daily Brief</p>
+        <h2>基于真实上下文生成今日简报</h2>
+        <div id="dailyBriefPanel" class="daily-brief-panel">
+          <span>点击生成，系统会读取当前用户的真实记录。</span>
+        </div>
+        <button id="dailyBriefBtn" class="secondary-action daily-brief-action">生成今日简报</button>
       </section>
 
       <section class="profile-panel">
@@ -52,6 +89,10 @@
         <h2>已加入计划的推荐项</h2>
         <div id="planSummary" class="plan-summary">
           <span>暂无计划项</span>
+        </div>
+        <div class="plan-export-row">
+          <button id="exportPlansBtn" class="secondary-action">导出 JSON</button>
+          <button id="exportPlansIcsBtn" class="secondary-action">导出日历 ICS</button>
         </div>
       </section>
 
@@ -102,7 +143,7 @@
           </h1>
           <p class="hero-copy">结合当前位置、推荐半径和你的长期偏好，生成能立刻出发的餐饮、购物与旅行建议。</p>
         </div>
-        <a class="doc-link" href="../docs/architecture.md">架构文档</a>
+        <a class="doc-link" href="https://github.com/F1ndWANG/AIGCGR/blob/main/docs/architecture.md" target="_blank" rel="noreferrer">架构文档</a>
       </header>
 
       <section class="composer" aria-label="推荐输入">

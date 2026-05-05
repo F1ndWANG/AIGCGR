@@ -19,6 +19,20 @@ def test_health_endpoint() -> None:
     assert "storage" in payload
 
 
+def test_cors_allows_configured_local_frontend_origin() -> None:
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/health",
+            headers={
+                "Origin": "http://127.0.0.1:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
 def test_user_context_endpoint_aggregates_runtime_data(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(storage, "DB_PATH", tmp_path / "liferec-test.sqlite3")
@@ -106,6 +120,88 @@ def test_user_context_endpoint_aggregates_runtime_data(monkeypatch, tmp_path: Pa
     assert payload["context_sources"]["wellness"] == "runtime.sqlite.wellness_events"
     assert payload["context_sources"]["preferences"] == "runtime.sqlite.user_preferences"
     assert payload["context_sources"]["plans"] == "runtime.sqlite.plan_items"
+    assert payload["life_state"]["user_id"] == "u-context"
+    assert payload["life_state"]["source_counts"]["meals"] == 1
+    assert payload["life_state"]["source_counts"]["wellness"] == 1
+    assert payload["life_state"]["active_plan_count"] == 1
+    assert payload["life_state"]["context_completeness"] > 0
+
+
+def test_life_state_api_encodes_runtime_context(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "liferec-test.sqlite3")
+    storage.save_recommendation_event(
+        request_id="req-life-state-1",
+        user_id="u-life-state",
+        scenario="restaurant",
+        message="Need a light dinner",
+        request_payload={"message": "Need a light dinner"},
+        context={"location": "campus"},
+        recommendations=[
+            {
+                "id": "poi-life-state",
+                "name": "Life State Cafe",
+                "type": "restaurant",
+                "score": 0.88,
+                "tags": ["light", "protein"],
+                "meta": {"source": "amap"},
+            }
+        ],
+    )
+
+    with TestClient(app) as client:
+        client.post("/api/user/meals", json={"user_id": "u-life-state", "meal_name": "fried chicken", "tags": ["high-oil"]})
+        client.post("/api/user/wellness", json={"user_id": "u-life-state", "tags": ["stress-high"], "stress_level": 4})
+        client.put(
+            "/api/user/preferences",
+            json={
+                "user_id": "u-life-state",
+                "default_location": "Nanjing",
+                "default_budget": 60,
+                "taste": ["light"],
+                "avoid": ["fried"],
+                "health_goals": ["protein"],
+            },
+        )
+        client.post(
+            "/api/feedback",
+            json={
+                "user_id": "u-life-state",
+                "item_id": "poi-life-state",
+                "item_name": "Life State Cafe",
+                "item_type": "restaurant",
+                "action": "save",
+                "tags": ["light"],
+            },
+        )
+        client.post(
+            "/api/user/plans",
+            json={
+                "user_id": "u-life-state",
+                "item_id": "poi-life-state",
+                "item_name": "Life State Cafe",
+                "item_type": "restaurant",
+                "title": "Try Life State Cafe",
+                "tags": ["light"],
+                "scheduled_for": "2030-01-02T03:04:00+00:00",
+            },
+        )
+        response = client.get("/api/user/life-state?user_id=u-life-state&limit=20")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user_id"] == "u-life-state"
+    assert payload["source_counts"]["meals"] == 1
+    assert payload["source_counts"]["wellness"] == 1
+    assert payload["source_counts"]["feedback_events"] == 1
+    assert payload["source_counts"]["plans"] == 1
+    assert payload["source_counts"]["recommendations"] == 1
+    assert payload["positive_feedback_count"] == 1
+    assert payload["scheduled_plan_count"] == 1
+    assert "high-oil" in payload["short_term_tags"]
+    assert "fried" in payload["constraints"]
+    assert payload["context_completeness"] == 1
+    assert 0 < payload["confidence"] <= 1
 
 
 def test_plan_status_api_updates_active_list(monkeypatch, tmp_path: Path) -> None:
@@ -126,20 +222,180 @@ def test_plan_status_api_updates_active_list(monkeypatch, tmp_path: Path) -> Non
             },
         )
         plan_id = created.json()["id"]
+        scheduled = client.patch(
+            f"/api/user/plans/{plan_id}",
+            json={"user_id": "u-plan-api", "scheduled_for": "2030-01-02T03:04:00+00:00"},
+        )
         updated = client.patch(
             f"/api/user/plans/{plan_id}",
             json={"user_id": "u-plan-api", "status": "done"},
         )
         active = client.get("/api/user/plans?user_id=u-plan-api&status=active")
         done = client.get("/api/user/plans?user_id=u-plan-api&status=done")
+        exported = client.get("/api/user/plans/export?user_id=u-plan-api")
+        exported_ics = client.get("/api/user/plans/export.ics?user_id=u-plan-api&status=done")
 
     assert created.status_code == 200
+    assert scheduled.status_code == 200
+    assert scheduled.json()["scheduled_for"] == "2030-01-02T03:04:00+00:00"
     assert updated.status_code == 200
     assert updated.json()["status"] == "done"
+    assert updated.json()["scheduled_for"] == "2030-01-02T03:04:00+00:00"
+    feedback = storage.feedback_summary(user_id="u-plan-api")
+    assert feedback["positive"]["items"]["测试餐厅"] == 1
+    assert feedback["events"][0]["action"] == "done"
     assert active.status_code == 200
     assert active.json()["plans"] == []
     assert done.status_code == 200
     assert done.json()["plans"][0]["id"] == plan_id
+    assert exported.status_code == 200
+    export_payload = exported.json()
+    assert export_payload["summary"]["active"] == 0
+    assert export_payload["summary"]["done"] == 1
+    assert export_payload["summary"]["total"] == 1
+    assert export_payload["done"][0]["id"] == plan_id
+    assert exported_ics.status_code == 200
+    assert "text/calendar" in exported_ics.headers["content-type"]
+    assert "BEGIN:VCALENDAR" in exported_ics.text
+    assert "BEGIN:VEVENT" in exported_ics.text
+    assert "DTSTART:20300102T030400Z" in exported_ics.text
+    assert "今晚去测试餐厅" in exported_ics.text
+
+
+def test_recommendation_history_api_uses_runtime_events(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "liferec-test.sqlite3")
+    storage.save_recommendation_event(
+        request_id="req-history-1",
+        user_id="u-history",
+        scenario="restaurant",
+        message="Need a light dinner near campus",
+        request_payload={"message": "Need a light dinner near campus", "scenario": "restaurant"},
+        context={"location": "campus", "radius_km": 3, "dynamic_location_enabled": False},
+        recommendations=[
+            {
+                "id": "poi-1",
+                "name": "Real Place",
+                "type": "restaurant",
+                "score": 0.91,
+                "tags": ["light"],
+                "meta": {"source": "amap"},
+            }
+        ],
+    )
+
+    with TestClient(app) as client:
+        history = client.get("/api/user/recommendations?user_id=u-history&limit=5")
+        context = client.get("/api/user/context?user_id=u-history&limit=5")
+
+    assert history.status_code == 200
+    payload = history.json()
+    assert payload["user_id"] == "u-history"
+    assert payload["recommendations"][0]["request_id"] == "req-history-1"
+    assert payload["recommendations"][0]["item_count"] == 1
+    assert payload["recommendations"][0]["top_items"][0]["name"] == "Real Place"
+    assert payload["recommendations"][0]["top_items"][0]["source"] == "amap"
+    assert context.status_code == 200
+    assert context.json()["recent_recommendations"][0]["request_id"] == "req-history-1"
+
+
+def test_daily_brief_api_aggregates_runtime_context(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "liferec-test.sqlite3")
+
+    with TestClient(app) as client:
+        client.post(
+            "/api/user/meals",
+            json={"user_id": "u-brief", "meal_name": "Salad", "tags": ["high-oil"]},
+        )
+        client.post(
+            "/api/user/wellness",
+            json={"user_id": "u-brief", "tags": ["stress-high"], "stress_level": 4},
+        )
+        client.put(
+            "/api/user/preferences",
+            json={"user_id": "u-brief", "default_location": "Nanjing", "default_budget": 50},
+        )
+        response = client.get("/api/user/daily-brief?user_id=u-brief&limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user_id"] == "u-brief"
+    assert payload["provider"] in {"context-generator", "unavailable", "llm"}
+    assert payload["summary"]
+    assert payload["life_state"]["user_id"] == "u-brief"
+    assert payload["life_state"]["source_counts"]["meals"] == 1
+    assert payload["life_state"]["source_counts"]["wellness"] == 1
+    assert payload["context_sources"]["meals"] == "runtime.sqlite.meal_events"
+    assert payload["context_sources"]["recommendations"] == "runtime.sqlite.recommendation_events"
+
+
+def test_user_memory_export_aggregates_runtime_data(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(storage, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(storage, "DB_PATH", tmp_path / "liferec-test.sqlite3")
+    storage.save_recommendation_event(
+        request_id="req-export-1",
+        user_id="u-export",
+        scenario="shopping",
+        message="Need healthy supplies",
+        request_payload={"message": "Need healthy supplies"},
+        context={"location": "Nanjing"},
+        recommendations=[
+            {
+                "id": "product-1",
+                "name": "Protein kit",
+                "type": "product",
+                "score": 0.87,
+                "tags": ["protein"],
+                "meta": {"source": "aigc"},
+            }
+        ],
+    )
+
+    with TestClient(app) as client:
+        client.post("/api/user/meals", json={"user_id": "u-export", "meal_name": "salad", "tags": ["light"]})
+        client.post("/api/user/wellness", json={"user_id": "u-export", "tags": ["stress-high"], "stress_level": 4})
+        client.put("/api/user/preferences", json={"user_id": "u-export", "default_location": "Nanjing"})
+        client.post(
+            "/api/feedback",
+            json={
+                "user_id": "u-export",
+                "item_id": "product-1",
+                "item_name": "Protein kit",
+                "item_type": "product",
+                "action": "save",
+                "tags": ["protein"],
+            },
+        )
+        client.post(
+            "/api/user/plans",
+            json={
+                "user_id": "u-export",
+                "item_id": "product-1",
+                "item_name": "Protein kit",
+                "item_type": "product",
+                "title": "Buy protein kit",
+                "tags": ["protein"],
+                "source": "aigc",
+            },
+        )
+        response = client.get("/api/user/export?user_id=u-export&limit=50")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user_id"] == "u-export"
+    assert payload["summary"]["meals"] == 1
+    assert payload["summary"]["wellness"] == 1
+    assert payload["summary"]["feedback_events"] == 1
+    assert payload["summary"]["plans"] == 1
+    assert payload["summary"]["recommendations"] == 1
+    assert payload["preferences"]["default_location"] == "Nanjing"
+    assert payload["plans"]["summary"]["active"] == 1
+    assert payload["recommendations"][0]["request_id"] == "req-export-1"
+    assert payload["life_state"]["user_id"] == "u-export"
+    assert payload["life_state"]["source_counts"]["recommendations"] == 1
+    assert payload["life_state"]["positive_feedback_count"] == 1
+    assert payload["context_sources"]["recommendations"] == "runtime.sqlite.recommendation_events"
 
 
 def test_user_runtime_context_is_isolated_by_user_id(monkeypatch, tmp_path: Path) -> None:

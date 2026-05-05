@@ -26,6 +26,8 @@ def evaluate_recommendation(request: RecommendationRequest, response: Recommenda
     issues.extend(_check_distance(request, response))
     issues.extend(_check_real_data_policy(response))
     issues.extend(_check_health_constraints(request, response))
+    issues.extend(_check_execution_cost(response))
+    issues.extend(_check_realness_guard(response))
 
     errors = [issue for issue in issues if issue.severity == "error"]
     warnings = [issue for issue in issues if issue.severity == "warning"]
@@ -34,6 +36,8 @@ def evaluate_recommendation(request: RecommendationRequest, response: Recommenda
         "error_count": len(errors),
         "warning_count": len(warnings),
         "recommendation_count": len(response.recommendations),
+        "average_executable_score": _average_executable_score(response),
+        "average_realness_score": _average_realness_score(response),
         "issues": [issue.__dict__ for issue in issues],
     }
 
@@ -142,6 +146,67 @@ def _check_health_constraints(request: RecommendationRequest, response: Recommen
                 )
             )
     return issues
+
+
+def _check_execution_cost(response: RecommendationResponse) -> list[EvaluationIssue]:
+    issues: list[EvaluationIssue] = []
+    for item in response.recommendations:
+        if item.execution.executable_score < 0.35:
+            blockers = ", ".join(item.execution.blockers[:4]) or "high_execution_cost"
+            issues.append(
+                EvaluationIssue(
+                    "low_executable_score",
+                    "warning",
+                    f"候选可执行性较低：score={item.execution.executable_score:g}, blockers={blockers}。",
+                    item.id,
+                    item.name,
+                )
+            )
+    return issues
+
+
+def _check_realness_guard(response: RecommendationResponse) -> list[EvaluationIssue]:
+    issues: list[EvaluationIssue] = []
+    for item in response.recommendations:
+        if item.realness.forbidden_claims:
+            issues.append(
+                EvaluationIssue(
+                    "aigc_forbidden_claim",
+                    "error" if response.context.get("data_source_policy") == "real-provider-only" else "warning",
+                    f"AIGC/非Provider内容包含禁止声明：{', '.join(item.realness.forbidden_claims)}。",
+                    item.id,
+                    item.name,
+                )
+            )
+        elif item.realness.hallucination_risk >= 0.7:
+            issues.append(
+                EvaluationIssue(
+                    "high_hallucination_risk",
+                    "warning",
+                    f"候选幻觉风险较高：risk={item.realness.hallucination_risk:g}, label={item.realness.label}。",
+                    item.id,
+                    item.name,
+                )
+            )
+    return issues
+
+
+def _average_executable_score(response: RecommendationResponse) -> float | None:
+    if not response.recommendations:
+        return None
+    return round(
+        sum(item.execution.executable_score for item in response.recommendations) / len(response.recommendations),
+        3,
+    )
+
+
+def _average_realness_score(response: RecommendationResponse) -> float | None:
+    if not response.recommendations:
+        return None
+    return round(
+        sum(item.realness.realness_score for item in response.recommendations) / len(response.recommendations),
+        3,
+    )
 
 
 def _first_number(meta: dict[str, Any], keys: list[str]) -> float | None:

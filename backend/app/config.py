@@ -19,6 +19,11 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def _csv_env(name: str, default: str) -> list[str]:
+    raw = os.getenv(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
 @dataclass(frozen=True)
 class Settings:
     amap_api_key: str | None = os.getenv("AMAP_API_KEY")
@@ -29,6 +34,14 @@ class Settings:
     product_provider: str = os.getenv("PRODUCT_PROVIDER", "aigc")
     strict_real_data: bool = os.getenv("STRICT_REAL_DATA", "false").lower() in {"1", "true", "yes", "on"}
     provider_cache_ttl_seconds: int = int(os.getenv("PROVIDER_CACHE_TTL_SECONDS", "300"))
+    cors_allow_origins: list[str] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "cors_allow_origins",
+            _csv_env("CORS_ALLOW_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173"),
+        )
 
 
 settings = Settings()

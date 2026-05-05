@@ -180,6 +180,38 @@ def get_recommendation_event(request_id: str) -> dict[str, Any] | None:
     }
 
 
+def recommendation_history(user_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    init_storage()
+    safe_limit = max(1, min(limit, 100))
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT request_id, user_id, scenario, message, context_json, recommendations_json, created_at
+            FROM recommendation_events
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (user_id, safe_limit),
+        ).fetchall()
+
+    history: list[dict[str, Any]] = []
+    for row in rows:
+        recommendations = _loads_list_of_dicts(row["recommendations_json"])
+        history.append(
+            {
+                "request_id": row["request_id"],
+                "scenario": row["scenario"],
+                "message": row["message"],
+                "created_at": row["created_at"],
+                "context": _loads_dict(row["context_json"]),
+                "item_count": len(recommendations),
+                "top_items": [_recommendation_top_item(item) for item in recommendations[:3]],
+            }
+        )
+    return history
+
+
 def save_feedback_event(
     request_id: str | None,
     user_id: str,
@@ -233,7 +265,7 @@ def feedback_summary(user_id: str, limit: int = 200) -> dict[str, Any]:
     for row in rows:
         action = str(row["action"])
         tags = _loads_list(row["tags_json"])
-        bucket = "positive" if action in {"like", "save", "plan"} else "negative"
+        bucket = "positive" if action in {"like", "save", "plan", "done"} else "negative"
         profile[bucket]["items"][row["item_name"]] = profile[bucket]["items"].get(row["item_name"], 0) + 1
         for tag in tags:
             profile[bucket]["tags"][tag] = profile[bucket]["tags"].get(tag, 0) + 1
@@ -569,21 +601,52 @@ def plan_items(user_id: str, status: str | None = "active", limit: int = 50) -> 
     return [_plan_row_to_dict(row) for row in rows]
 
 
-def update_plan_item_status(plan_id: int, user_id: str, status: str) -> dict[str, Any] | None:
+def update_plan_item(plan_id: int, user_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
     init_storage()
+    allowed_fields = {"status", "title", "note", "scheduled_for"}
+    assignments: list[str] = []
+    params: list[Any] = []
+
+    if "status" in updates and updates["status"] is not None:
+        assignments.append("status = ?")
+        params.append(updates["status"])
+    if "title" in updates:
+        cleaned_title = _clean_text(updates["title"])
+        if cleaned_title:
+            assignments.append("title = ?")
+            params.append(cleaned_title)
+    if "note" in updates:
+        assignments.append("note = ?")
+        params.append(_clean_text(updates["note"]))
+    if "scheduled_for" in updates:
+        assignments.append("scheduled_for = ?")
+        params.append(_clean_text(updates["scheduled_for"]))
+
+    ignored_fields = set(updates) - allowed_fields
+    if ignored_fields:
+        raise ValueError(f"Unsupported plan update fields: {', '.join(sorted(ignored_fields))}")
+    if not assignments:
+        return get_plan_item(plan_id=plan_id, user_id=user_id)
+
     updated_at = _now()
+    assignments.append("updated_at = ?")
+    params.extend([updated_at, plan_id, user_id])
     with _connect() as conn:
         cursor = conn.execute(
-            """
+            f"""
             UPDATE plan_items
-            SET status = ?, updated_at = ?
+            SET {", ".join(assignments)}
             WHERE id = ? AND user_id = ?
             """,
-            (status, updated_at, plan_id, user_id),
+            params,
         )
         if cursor.rowcount == 0:
             return None
     return get_plan_item(plan_id=plan_id, user_id=user_id)
+
+
+def update_plan_item_status(plan_id: int, user_id: str, status: str) -> dict[str, Any] | None:
+    return update_plan_item(plan_id=plan_id, user_id=user_id, updates={"status": status})
 
 
 def get_cache(cache_key: str) -> dict[str, Any] | None:
@@ -714,6 +777,18 @@ def _loads_list_of_dicts(value: str) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return [item for item in data if isinstance(item, dict)]
+
+
+def _recommendation_top_item(item: dict[str, Any]) -> dict[str, Any]:
+    meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+    return {
+        "id": str(item.get("id") or ""),
+        "name": str(item.get("name") or ""),
+        "type": str(item.get("type") or ""),
+        "score": item.get("score") if isinstance(item.get("score"), (int, float)) else None,
+        "tags": [str(tag) for tag in item.get("tags", []) if tag is not None] if isinstance(item.get("tags"), list) else [],
+        "source": str(meta.get("source") or meta.get("provider")) if meta.get("source") or meta.get("provider") else None,
+    }
 
 
 def _plan_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
